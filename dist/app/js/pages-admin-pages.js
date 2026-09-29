@@ -72,6 +72,36 @@ function pageList(refresh) {
   return wrap;
 }
 
+// A toolbar bound to one input, so a click can act on that field's selection.
+// Returned as a node rather than inserted inline at every call site, because the
+// point is that every text field gets one and a missed field is a formatting
+// feature that silently does not exist there.
+function bbcodeBar(input, onChange) {
+  const bar = el('div', { class: 'bbcode-bar', role: 'toolbar', 'aria-label': 'Formatting' });
+  for (const spec of BBCODE_TOOLS) {
+    bar.appendChild(el('button', {
+      class: 'bbcode-bar__btn', type: 'button', title: spec.title, 'aria-label': spec.title,
+      onClick: (e) => {
+        e.preventDefault();
+        applyBBCode(input, spec);
+        onChange();
+      },
+    }, spec.label));
+  }
+  return bar;
+}
+
+// A text field plus its toolbar. Every editable string in a block goes through
+// this, so formatting behaves the same everywhere and cannot be added to some
+// fields and forgotten on others.
+function bbcodeField(label, input, onChange, hint) {
+  return el('div', { class: 'field' },
+    el('label', {}, label),
+    input,
+    hint ? el('span', { class: 'hint' }, hint) : null,
+    bbcodeBar(input, onChange));
+}
+
 function blockEditor(page, blocks, onChange) {
   const list = el('div', { class: 'card-list' });
 
@@ -85,7 +115,7 @@ function blockEditor(page, blocks, onChange) {
       if (b.type === 'heading') {
         const h = el('input', { class: 'input', type: 'text', value: b.text || '' });
         h.addEventListener('input', () => { b.text = h.value; onChange(); });
-        row.appendChild(el('div', { class: 'field' }, el('label', {}, 'Text'), h));
+        row.appendChild(bbcodeField('Text', h, onChange));
         const sel = el('select', { class: 'select' });
         for (const lv of [2, 3]) sel.appendChild(el('option', { value: String(lv) }, 'Level ' + lv));
         sel.value = String(b.level || 2);
@@ -109,7 +139,7 @@ function blockEditor(page, blocks, onChange) {
       } else if (b.type === 'note') {
         const ta = el('textarea', { class: 'textarea', rows: 3, value: b.text || '' });
         ta.addEventListener('input', () => { b.text = ta.value; onChange(); });
-        row.appendChild(el('div', { class: 'field' }, el('label', {}, 'Text'), ta));
+        row.appendChild(bbcodeField('Text', ta, onChange));
         const sel = el('select', { class: 'select' });
         for (const k of ['info', 'warn']) sel.appendChild(el('option', { value: k }, k));
         sel.value = b.kind || 'info';
@@ -120,7 +150,7 @@ function blockEditor(page, blocks, onChange) {
         t.addEventListener('input', () => { b.text = t.value; onChange(); });
         const h = el('input', { class: 'input', type: 'text', value: b.href || '' });
         h.addEventListener('input', () => { b.href = h.value; onChange(); });
-        row.appendChild(el('div', { class: 'field' }, el('label', {}, 'Text'), t));
+        row.appendChild(bbcodeField('Text', t, onChange));
         row.appendChild(el('div', { class: 'field' },
           el('label', {}, 'Target'), h,
           el('span', { class: 'hint' }, 'http, https, mailto, or a path starting with /')));
@@ -129,7 +159,7 @@ function blockEditor(page, blocks, onChange) {
       } else {
         const ta = el('textarea', { class: 'textarea', rows: 3, value: b.text || '' });
         ta.addEventListener('input', () => { b.text = ta.value; onChange(); });
-        row.appendChild(el('div', { class: 'field' }, el('label', {}, 'Text'), ta));
+        row.appendChild(bbcodeField('Text', ta, onChange));
       }
 
       const tools = el('div', { class: 'row-line' });
@@ -153,32 +183,126 @@ function blockEditor(page, blocks, onChange) {
   return list;
 }
 
+// The BBCode an operator can insert, and what each one is for. Shown in the
+// editor rather than only documented, because the alternative is an operator
+// discovering the syntax by reading the raw brackets off someone else's page.
+const BBCODE_TOOLS = [
+  { tag: 'b', label: 'B', title: 'Bold' },
+  { tag: 'i', label: 'I', title: 'Italic' },
+  { tag: 'u', label: 'U', title: 'Underline' },
+  { tag: 's', label: 'S', title: 'Strikethrough' },
+  { tag: 'url', label: 'Link', title: 'Link', arg: 'https://', body: 'link text' },
+  { tag: 'quote', label: 'Quote', title: 'Quotation' },
+  { tag: 'code', label: 'Code', title: 'Preformatted, contents shown literally' },
+  { tag: 'spoiler', label: 'Spoiler', title: 'Hidden until focused' },
+  { tag: 'color', label: 'Colour', title: 'Named colour or #hex', arg: 'red' },
+  { tag: 'size', label: 'Size', title: '1 (small) to 7 (large)', arg: '5' },
+  { tag: 'center', label: 'Centre', title: 'Centred' },
+];
+
+// Wraps the current selection, or inserts an empty pair and places the caret
+// between the tags. Operates on the textarea the block is built from, which is
+// why the block editor passes the input in rather than the block: the caret and
+// selection only exist on the element.
+function applyBBCode(input, spec) {
+  const start = input.selectionStart == null ? input.value.length : input.selectionStart;
+  const end = input.selectionEnd == null ? start : input.selectionEnd;
+  const sel = input.value.slice(start, end);
+  const open = spec.arg ? '[' + spec.tag + '=' + spec.arg + ']' : '[' + spec.tag + ']';
+  const close = '[/' + spec.tag + ']';
+  const body = sel || spec.body || '';
+  const next = input.value.slice(0, start) + open + body + close + input.value.slice(end);
+  input.value = next;
+  // Put the caret on the text the operator is meant to edit: inside the pair
+  // when they had no selection, over their own text when they did.
+  const caret = sel ? start + open.length + sel.length : start + open.length;
+  input.focus();
+  input.setSelectionRange(caret, caret);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function pageEditor(container, route) {
   clear(container);
-  renderContextHeader({ title: 'Pages', sub: '/' + route });
 
-  const wrap = el('div', { class: 'page atrium settings-layout' });
-  const body = el('div', { class: 'settings-body' });
-  wrap.appendChild(body);
+  // Full page means escaping the shell's content column, not just using a wider
+  // div inside it. Two things sit between the editor and the viewport: the
+  // context header, which the shell renders for every route, and the padding and
+  // width cap on .main-content. The editor draws its own bar, so the header is
+  // hidden for this route only, by the flag below. Scoped to the route so every
+  // other page keeps the chrome it expects, and cleared on the way out so
+  // leaving the editor restores it.
+  document.documentElement.dataset.fullpage = 'page-editor';
+
+  const wrap = el('div', { class: 'page-editor' });
+
+  const head = el('header', { class: 'page-editor__bar' });
+  const back = el('button', {
+    class: 'btn ghost sm', type: 'button',
+    onClick: () => { location.hash = '#/admin/pages'; },
+  }, '← All pages');
+  head.appendChild(back);
+  head.appendChild(el('h1', { class: 'page-editor__title' }, '/' + route));
+  wrap.appendChild(head);
+
+  const main = el('div', { class: 'page-editor__main' });
+  const body = el('div', { class: 'page-editor__body' });
+  const side = el('aside', { class: 'page-editor__side' });
+  main.appendChild(body);
+  main.appendChild(side);
+  wrap.appendChild(main);
   container.appendChild(wrap);
 
   const state = { blocks: [], title: '', page: null, dirty: false };
 
-  const markDirty = () => { state.dirty = true; paintStatus(); };
+  const markDirty = () => { state.dirty = true; paintStatus(); queuePreview(); };
   const paintStatus = () => {
     const s = body.querySelector('[data-dirty]');
     if (s) s.textContent = state.dirty ? 'Unsaved changes' : 'Saved';
   };
 
+  // Live preview. Server-rendered, deliberately: a client-side reimplementation
+  // of the BBCode parser would be a second parser, and the one thing an editor
+  // must not do is preview something different from what gets published. Coalesced
+  // because it is a request per keystroke otherwise.
+  let previewTimer = null;
+  let previewSeq = 0;
+  const queuePreview = () => {
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => {
+      previewTimer = null;
+      const mine = ++previewSeq;
+      Api.adminPreviewPage(route, state.blocks)
+        .then((r) => {
+          // A slower earlier request must not overwrite a newer render.
+          if (mine !== previewSeq) return;
+          clear(previewOut);
+          previewOut.appendChild(el('div', { class: 'prose', html: r.html }));
+        })
+        .catch(() => {
+          if (mine !== previewSeq) return;
+          clear(previewOut);
+          previewOut.appendChild(el('p', { class: 'muted small' }, 'Preview unavailable.'));
+        });
+    }, 400);
+  };
+
+  const previewOut = el('div', { class: 'page-editor__preview prose' });
+  side.appendChild(el('div', { class: 'page-editor__side-inner' },
+    el('div', { class: 'section-label' }, 'Preview'),
+    previewOut,
+    el('div', { class: 'section-label' }, 'Formatting'),
+    el('p', { class: 'muted small' },
+      'Text accepts BBCode, the notation most forums use, so a page can be copied out and keep its formatting. '
+      + 'Everything else is shown exactly as typed.'),
+    el('ul', { class: 'bbcode-ref' }, ...BBCODE_TOOLS.map((t) => el('li', {},
+      el('code', {}, '[' + t.tag + (t.arg ? '=' + t.arg : '') + ']' + (t.body || '…') + '[/' + t.tag + ']'),
+      el('span', { class: 'muted small' }, ' ' + t.title))))));
+
   const rebuild = () => {
     clear(body);
 
-    body.appendChild(el('div', { class: 'row-line' },
-      el('button', {
-        class: 'btn ghost', type: 'button',
-        onClick: () => { location.hash = '#/admin/pages'; },
-      }, 'All pages'),
-      el('span', { class: 'muted small', 'data-dirty': '' }, 'Saved')));
+    body.appendChild(el('div', { class: 'page-editor__status' },
+      el('span', { class: 'muted small', 'data-dirty': '' }, state.dirty ? 'Unsaved changes' : 'Saved')));
 
     const title = el('input', { class: 'input', id: 'page-title', type: 'text', value: state.title });
     title.addEventListener('input', () => { state.title = title.value; markDirty(); });
@@ -188,6 +312,19 @@ function pageEditor(container, route) {
       body.appendChild(el('div', { class: 'draft-note', role: 'note' },
         el('strong', {}, 'This is a legal page. '),
         'Publishing is visible to everyone immediately and is written to the audit log. Check the content carefully before you publish.'));
+    }
+
+    // An empty editor on a page that has never been drafted reads as a broken
+    // one. It is not: the shipped file is still live until something is
+    // published, and saying so is the difference between an operator who
+    // understands what they are looking at and one who assumes the page is
+    // empty for visitors too.
+    if (!state.blocks.length && state.page.status !== 'PUBLISHED') {
+      const box = el('div', { class: 'draft-note', role: 'note' });
+      box.appendChild(el('strong', {}, 'Nothing drafted yet. '));
+      box.appendChild(el('span', {}, 'Visitors are currently seeing the template that ships with Trycord. '
+        + 'Add blocks below, or save an empty draft to publish a blank page.'));
+      body.appendChild(box);
     }
     if (state.page.outstandingFields && state.page.outstandingFields.length) {
       const box = el('div', { class: 'field' });
@@ -211,7 +348,7 @@ function pageEditor(container, route) {
 
     body.appendChild(blockEditor(state.page, state.blocks, markDirty));
 
-    const bar = el('div', { class: 'row-line' });
+    const bar = el('div', { class: 'page-editor__actions' });
     bar.appendChild(el('button', {
       class: 'btn', type: 'button',
       onClick: () => Api.adminPreviewPage(route, state.blocks)
@@ -261,13 +398,16 @@ function pageEditor(container, route) {
       class: 'btn ghost', type: 'button',
       onClick: () => showRevisions(state, route),
     }, 'Revision history'));
-    body.appendChild(bar);
+    wrap.appendChild(bar);
 
     if (state.page.publishedAt) {
       body.appendChild(el('p', { class: 'muted small' },
         'Last published ' + new Date(state.page.publishedAt).toLocaleString() + '.'));
     }
     paintStatus();
+    // Paint the preview on first load and after any structural change, so the
+    // pane is never blank waiting for a keystroke.
+    queuePreview();
   };
 
   const publishFlow = async (st) => {
@@ -361,8 +501,12 @@ export async function renderAdminPages(container, { route } = {}) {
     pageEditor(container, route);
     return;
   }
+  // The editor hid the shell's context header for itself. Leaving it set would
+  // take the header away from the page list too, and from whatever the member
+  // navigates to next.
+  delete document.documentElement.dataset.fullpage;
   clear(container);
-  renderContextHeader({ title: 'Pages', sub: 'Public pages an operator can edit' });
+  renderContextHeader({ title: 'Pages', sub: 'Public pages an editor can change' });
   const wrap = el('div', { class: 'page atrium' });
   wrap.appendChild(el('p', { class: 'muted small' },
     'These pages ship as templates. The sections describing what the software does are accurate everywhere; '
