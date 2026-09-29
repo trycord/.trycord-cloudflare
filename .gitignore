@@ -1,0 +1,10 @@
+# Product source fetched by build.js, not part of this repository.
+.build/
+
+node_modules/
+.wrangler/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.swp

@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  >
+
+  <meta
+    name="description"
+    content="Trycord communication client"
+  >
+
+  <!-- Content Security Policy. Covers both browser (server-rendered, which
+       also sends its own header — policies intersect) and the desktop
+       Electron build loading this page from file://. 'self' covers the
+       local client; connect-src permits the configured API/WebSocket
+       backend; blob: is required for attachment previews. -->
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self';
+             img-src 'self' data: blob: http: https:;
+             media-src 'self' blob: http: https:;
+             font-src 'self' data:;
+             connect-src 'self' http: https: ws: wss:;
+             worker-src 'self' blob:;
+             object-src 'none'; frame-src 'none';
+             base-uri 'self'; form-action 'self'"
+  >
+
+  <title>Trycord</title>
+
+  <!-- Brand logo -->
+  <link rel="icon" href="./assets/trycord-logo.ico" type="image/x-icon">
+  <link rel="icon" href="./assets/trycord-logo.png" type="image/png">
+  <link rel="apple-touch-icon" href="./assets/trycord-logo.png">
+
+  <!-- Application stylesheet -->
+  <link rel="stylesheet" href="./css/app.css">
+</head>
+
+<body>
+  <!-- Keyboard accessibility. Each shell owns a main landmark and only one is
+       displayed at a time, so there is one skip link per breakpoint pointing at
+       the landmark that is actually live. CSS decides which is shown. -->
+  <a class="skip-link skip-link--desktop" href="#trycord-main">Skip to main content</a>
+  <a class="skip-link skip-link--mobile" href="#mobile-main">Skip to main content</a>
+
+  <!--
+    ============================================================
+    TRYCORD APPLICATION
+    ============================================================
+
+    IMPORTANT:
+
+    This is the APPLICATION shell.
+
+    This is NOT:
+    - the public landing page
+    - a dashboard
+    - a marketing page
+    - a static documentation page
+
+    Do not populate this HTML with mock users, communities,
+    channels, messages, or other application data.
+
+    JavaScript must populate these regions from the real
+    application state/API/WebSocket system.
+  -->
+
+  <div id="app" class="trycord-app">
+
+    <!-- ======================================================
+         MOBILE SHELL
+         ====================================================== -->
+
+    <section
+      id="mobile-shell"
+      class="shell shell--mobile"
+      aria-label="Trycord mobile application"
+      hidden
+    >
+      <!-- Mobile drawer navigation was removed for a clean-slate remake.
+           Bottom tabs (renderMobileTabs) remain the interim navigation. -->
+      <header class="mobile-header">
+        <div
+          id="mobile-context"
+          class="mobile-context"
+        ></div>
+      </header>
+
+      <main
+        id="mobile-main"
+        class="mobile-main"
+      ></main>
+
+      <nav
+        id="mobile-tab-navigation"
+        class="mobile-tab-navigation"
+        aria-label="Primary navigation"
+      ></nav>
+    </section>
+
+
+    <!-- ======================================================
+         DESKTOP SHELL
+         ====================================================== -->
+
+    <section
+      id="desktop-shell"
+      class="shell shell--desktop"
+      aria-label="Trycord desktop application"
+      hidden
+    >
+
+      <!-- ====================================================
+           PRESENCE SPINE
+
+           This is NOT an icon rail.
+
+           It is the persistent spatial navigation environment.
+           ==================================================== -->
+
+      <aside
+        id="app-rail"
+        class="app-rail"
+        aria-label="Trycord navigation"
+      >
+
+        <!-- Identity lives in the context sidebar header; kept as an empty
+             landmark so the region is addressable by the shell. -->
+        <header
+          id="identity-region"
+          class="rail-identity"
+        ></header>
+
+        <!-- Global destinations:
+             Home / DMs / other real application destinations.
+             Collapsed into the rail on desktop; kept as a landmark for
+             assistive tech and future per-context rail groups. -->
+        <nav
+          id="global-navigation"
+          class="rail-global-nav"
+          aria-label="Global navigation"
+        ></nav>
+
+        <!-- Real communities belonging to the authenticated user -->
+        <section
+          id="community-navigation"
+          class="app-rail__items"
+          aria-label="Communities"
+        ></section>
+
+        <!-- Contextual navigation for the currently selected
+             community/place -->
+        <section
+          id="place-navigation"
+          class="context-sidebar"
+          aria-label="Current place navigation"
+        ></section>
+
+      </aside>
+
+
+      <!-- ====================================================
+           MAIN ENVIRONMENT / ATRIUM
+           ==================================================== -->
+
+      <main
+        id="trycord-main"
+        class="main-content"
+      >
+
+        <!--
+          Context belongs INSIDE the environment.
+
+          This is not a permanent application-wide top bar.
+          It changes according to the current place.
+        -->
+        <header
+          id="context-header"
+          class="context-header"
+        ></header>
+
+        <!--
+          Primary application viewport.
+
+          JavaScript renders the currently active real
+          application surface here.
+        -->
+        <div class="chat-environment">
+          <section
+            id="view-root"
+            class="view-root"
+          ></section>
+
+          <aside
+            id="member-sidebar"
+            class="member-sidebar"
+            aria-label="Community members"
+          ></aside>
+        </div>
+
+      </main>
+
+      <div
+        id="desktop-backdrop"
+        class="desktop-backdrop"
+        aria-hidden="true"
+        hidden
+      ></div>
+
+    </section>
+
+
+    <!-- ======================================================
+         GLOBAL OVERLAYS
+         ======================================================
+
+         These are intentionally outside the shells so they can
+         be used by both desktop and mobile.
+    -->
+
+    <div
+      id="modal-root"
+      class="modal-root"
+    ></div>
+
+    <div
+      id="popover-root"
+      class="popover-root"
+    ></div>
+
+    <!-- Route changes are announced here rather than by making the whole view a
+         live region, which would re-read the entire page on every render. -->
+    <div
+      id="route-announcer"
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+
+    <div
+      id="toast-root"
+      class="toast-root"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+
+
+    <!-- ======================================================
+         APPLICATION STATUS
+         ====================================================== -->
+
+    <div
+      id="connection-status"
+      class="connection-status"
+      role="status"
+      aria-live="polite"
+    ></div>
+
+  </div>
+
+
+  <!--
+    ============================================================
+    APPLICATION JAVASCRIPT
+    ============================================================
+
+    Keep application logic in JS modules.
+
+    The HTML above is the structural shell only.
+
+    Do not put:
+    - fake data
+    - example communities
+    - example messages
+    - fake users
+    - fake channels
+    - fake API responses
+
+    into this document.
+  -->
+
+  <!-- Crash surface: if a module fails to load (stale cache mixing during
+       live development), show an actionable message instead of a blank window. -->
+  <script src="./js/crash.js"></script>
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
