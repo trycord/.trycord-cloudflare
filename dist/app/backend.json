@@ -1,6 +1,7 @@
 {
-  "backendUrl": "https://trycord-api.wispbyte.app",
+  "backendUrl": "https://api.trycord.dev",
   "fallbackUrls": [
+    "https://trycord-api.wispbyte.app",
     "https://backend-api.trycord.dev"
   ]
 }

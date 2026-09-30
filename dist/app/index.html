@@ -1,8 +1,6 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <base href="/app/">
-
   <meta charset="UTF-8">
 
   <meta
@@ -38,6 +36,20 @@
        tab actually uses. The PNG master is 1254x1254 (958 KB) and is rendered
        at 28-72px in the UI and 180px by iOS, so neither consumer benefits from
        it; loading it as a second icon just fetched the large file as well. -->
+  <!-- Asset URLs are relative, so without a base they resolve against the current
+       route rather than the app root: /settings/security asks the server for
+       /settings/css/app.css, receives a document instead of a stylesheet, and
+       renders with no styling and no application.
+
+       The value written here is the hosted mount. The server rewrites it per
+       request for anything served from a different mount, because it is the only
+       thing that knows where it is mounted - the same file is served from the
+       origin root by a self-hoster and from /app by the hosted deployment. The
+       Cloudflare deployment serves this file statically with no rewrite, so what
+       is written here is what that deployment gets. "/" was correct for a
+       self-hoster at the root and silently broke the hosted one. -->
+  <base href="/app/">
+
   <link rel="icon" href="./assets/trycord-logo.ico" sizes="any" type="image/x-icon">
   <link rel="apple-touch-icon" href="./assets/trycord-logo.ico">
 
