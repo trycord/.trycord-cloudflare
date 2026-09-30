@@ -175,6 +175,45 @@ if (!fs.existsSync(wrangler)) {
   }
 }
 
+// Every host the client is told to talk to must be one that resolves. A
+// fallback that does not is worse than no fallback: the client announces the
+// switch to the user and then cannot reach anything, so a failover caused by a
+// brief primary outage ends in an empty instance and a reader concluding their
+// account is gone.
+//
+// This deployment shipped backend-api.trycord.dev as a third fallback for as
+// long as the default in build.js pointed at it, and it has no DNS record.
+{
+  const cfg = JSON.parse(fs.readFileSync(path.join(DIST, 'app', 'backend.json'), 'utf8'));
+  const hosts = [cfg.backendUrl].concat(cfg.fallbackUrls || []).filter(Boolean);
+  const bad = [];
+  for (const h of hosts) {
+    const m = /^https?:\/\/([^/]+)/i.exec(h);
+    if (!m) { bad.push(h + ' (not an absolute URL)'); continue; }
+    // Both families are checked because both backends sit behind Cloudflare,
+    // which commonly publishes AAAA and no A. A v4-only check reports a
+    // perfectly working host as dead, and a check that cries wolf gets deleted
+    // instead of fixed - which is how this class of bug survives.
+    // Node's dns module has no synchronous resolver, and this file is written
+    // synchronously from top to bottom. getent is in coreutils on every host
+    // this runs on and answers the same question synchronously.
+    // Both families are covered because getent hosts returns AAAA as well as A,
+    // and Cloudflare commonly publishes AAAA with no A - a v4-only check would
+    // report both real backends as dead, and a check that cries wolf gets
+    // deleted rather than fixed.
+    let found = false;
+    try {
+      const out = require('child_process').execSync('getent hosts ' + JSON.stringify(m[1]), {
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).toString();
+      found = out.trim().length > 0;
+    } catch (e) { found = false; }
+    if (!found) bad.push(h + ' (does not resolve)');
+  }
+  ok('every configured backend host resolves', bad.length === 0,
+    'unreachable: ' + bad.join(', '));
+}
+
 // The Worker is this deployment's routing layer, and its fallback condition was
 // wrong in a way no static check would catch: the asset binding answers an
 // unknown path with a redirect, not a 404, so `status !== 404` returned the

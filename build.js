@@ -171,7 +171,24 @@ function applyOverrides(dir) {
 //
 // The client announces the switch and offers a way back - it does not fail
 // silently - because accounts and communities live on one instance's database.
-const BACKUP_URL = (process.env.TRYCORD_BACKEND_URL || 'https://backend-api.trycord.dev').replace(/\/+$/, '');
+// The backup the client fails over to when the primary API is unreachable.
+//
+// This has to be a host that resolves. It defaulted to backend-api.trycord.dev,
+// which has no DNS record, so every deployment shipped a fallback that could not
+// connect - and a client failing over to an unresolvable host is worse than one
+// that does not fail over at all, because it also announces the switch and then
+// shows an empty instance.
+//
+// A deployment that needs a different backup sets TRYCORD_BACKEND_URL, which
+// overrides this. The client still announces the switch and offers a way back -
+// it does not fail silently - because accounts and communities live on one
+// instance's database.
+const DEFAULT_BACKUP_URL = 'https://trycord-api.wispbyte.app';
+const BACKUP_URL = (process.env.TRYCORD_BACKEND_URL || DEFAULT_BACKUP_URL).replace(/\/+$/, '');
+
+if (!/^https?:\/\//i.test(BACKUP_URL)) {
+  throw new Error('TRYCORD_BACKEND_URL must be an absolute http(s) URL, got: ' + BACKUP_URL);
+}
 
 function writeBackendConfig(dest) {
   let cfg = {};
