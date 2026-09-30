@@ -109,6 +109,35 @@ function build() {
   // of the brand images (in trycord-client/assets). Republish them at the
   // deployment root so the static site resolves them.
   copyInto(path.join(app, 'assets'), path.join(DIST, 'assets'));
+
+  writeBackendConfig(path.join(app, 'backend.json'));
+}
+
+// The hosted front end is the only place a backup instance is named.
+//
+// The product repo's trycord-client/backend.json deliberately carries no
+// fallback list, so a self-hoster's build has none: their instance is never
+// quietly repointed at someone else's. Adding it here, in the deployment, is
+// what keeps that true while still giving the hosted client somewhere to go
+// when the primary API is unreachable.
+//
+// The client announces the switch and offers a way back - it does not fail
+// silently - because accounts and communities live on one instance's database.
+const BACKUP_URL = (process.env.TRYCORD_BACKEND_URL || 'https://backend-api.trycord.dev').replace(/\/+$/, '');
+
+function writeBackendConfig(dest) {
+  let cfg = {};
+  const existing = path.join(SRC, 'trycord-client', 'backend.json');
+  if (fs.existsSync(existing)) {
+    try { cfg = JSON.parse(fs.readFileSync(existing, 'utf8')); } catch (e) {
+      throw new Error('trycord-client/backend.json is not valid JSON: ' + e.message);
+    }
+  }
+  const fallbacks = Array.isArray(cfg.fallbackUrls) ? cfg.fallbackUrls.filter(Boolean) : [];
+  if (!fallbacks.includes(BACKUP_URL)) fallbacks.push(BACKUP_URL);
+  const out = Object.assign({}, cfg, { fallbackUrls: fallbacks });
+  fs.writeFileSync(dest, JSON.stringify(out, null, 2) + '\n');
+  process.stdout.write(`  app/backend.json: ${out.backendUrl || '(unset)'} + ${fallbacks.length} fallback(s)\n`);
 }
 
 const head = fetchSource();

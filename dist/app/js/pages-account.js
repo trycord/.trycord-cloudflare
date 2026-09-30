@@ -565,7 +565,12 @@ function renderTwoFactorSection(wrap) {
   wrap.appendChild(body);
   wrap.appendChild(err);
 
-  const fail = (ex) => { err.hidden = false; err.textContent = (ex && ex.message) || 'Something went wrong'; };
+  const fail = (ex) => {
+    err.hidden = false;
+    // Fall back to the server's own wording; only when there is none, say
+    // what to do rather than that something happened.
+    err.textContent = (ex && ex.message) || 'Could not save that change. Check your connection and try again.';
+  };
 
   // Status drives the whole section, so it is fetched rather than assumed: a
   // stale local guess would offer to "enable" a factor that is already on.
@@ -857,7 +862,7 @@ export async function renderAccount(container, { tab = 'profile' } = {}) {
     renderSessionsSection(body);
   } else if (tab === 'backend') {
     body.appendChild(el('div', { class: 'section-label' }, 'Backend'));
-    body.appendChild(el('p', { class: 'muted small' }, 'Choose which Trycord server this app talks to. Switching servers signs you out here first.'));
+    body.appendChild(el('p', { class: 'muted small' }, 'Choose which Trycord instance this app talks to. Switching instances signs you out here first.'));
     const backendBox = el('div', { class: 'card card--auth' });
     renderBackendSelector(backendBox);
     body.appendChild(backendBox);

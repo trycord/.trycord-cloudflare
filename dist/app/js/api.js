@@ -23,6 +23,54 @@ function base() {
   return TrycordConfig.backendUrl().replace(/\/+$/, '');
 }
 
+// At most one failover per origin per session. Without this a dead backend costs
+// a probe on every single request, which turns one outage into a slow client on
+// top of the outage.
+let failoverTriedFor = null;
+let failoverInFlight = null;
+let failoverAnnounced = false;
+
+// Listeners live here rather than in realtime.js: the socket layer calls the
+// API, so having the API emit into it would be a cycle.
+const failoverListeners = new Set();
+
+export function onFailover(fn) {
+  if (typeof fn === 'function') failoverListeners.add(fn);
+  return () => failoverListeners.delete(fn);
+}
+
+// A later outage has to be announceable again after the user switches back.
+export function resetFailoverAnnouncement() {
+  failoverAnnounced = false;
+  failoverTriedFor = null;
+}
+
+function notifyFailover() {
+  if (failoverAnnounced) return;
+  const moved = TrycordConfig.failover();
+  if (!moved) return;
+  failoverAnnounced = true;
+  for (const fn of failoverListeners) {
+    try { fn(moved); } catch { /* one listener must not break the request */ }
+  }
+}
+
+async function maybeFailover() {
+  const candidates = TrycordConfig.backendFallbacks();
+  if (!candidates.length) return false;
+
+  const from = base();
+  if (failoverTriedFor === from) return false;
+  failoverTriedFor = from;
+
+  // Concurrent first requests must not each start a probe.
+  if (!failoverInFlight) {
+    failoverInFlight = TrycordConfig.tryFallbacks().finally(() => { failoverInFlight = null; });
+  }
+  const moved = await failoverInFlight;
+  return !!moved;
+}
+
 export function token() {
   try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
@@ -56,6 +104,19 @@ async function request(method, path, { body, auth = true, raw = false, form = fa
   try {
     res = await fetch(url, { method, headers, body: payload, credentials: 'omit', signal: ctrl.signal });
   } catch (e) {
+    // Transport-level failure only: a 5xx or a 404 is the instance answering, so
+    // those never trigger a switch. One attempt per unreachable origin, not one
+    // per request, because a dead backend means every subsequent call would pay
+    // the same probe.
+    if (await maybeFailover()) {
+      clearTimeout(timer);
+      const retried = await request(method, path, { body, auth, raw, form });
+      // Announced only once the retried request has actually succeeded. Firing
+      // on the switch itself would show the notice for a backup that then fails
+      // too, and would still reject back to the caller.
+      notifyFailover();
+      return retried;
+    }
     if (e && e.name === 'AbortError') throw new ApiError('TIMEOUT', 'the request timed out — the backend may be unreachable', 0);
     throw new ApiError('NETWORK', 'cannot reach the Trycord server', 0);
   } finally {

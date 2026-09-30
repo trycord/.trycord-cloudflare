@@ -100,7 +100,7 @@ function loginForm(container) {
   const secondary = el('div', { class: 'auth-secondary' },
     el('h2', { class: 'auth-secondary__title' }, 'Connect to an instance'),
     el('p', { class: 'auth-secondary__lede' },
-      'Running your own? Point Trycord at your server instead of the default.'),
+      'Running your own? Point Trycord at your instance instead of the default.'),
     backendBox);
 
   const { page, main } = authShell({
@@ -175,7 +175,7 @@ function registerForm(container) {
   const secondary = el('div', { class: 'auth-secondary' },
     el('h2', { class: 'auth-secondary__title' }, 'Connect to an instance'),
     el('p', { class: 'auth-secondary__lede' },
-      'Already running your own? Point Trycord at your server before you sign up.'),
+      'Already running your own? Point Trycord at your instance before you sign up.'),
     backendBox);
 
   const { page, main } = authShell({
@@ -324,7 +324,7 @@ function resetPasswordPage(container, token) {
     try {
       const res = await Api.resetPassword({ token, newPassword: password.value, confirmPassword: confirm.value });
       ok.hidden = false;
-      ok.textContent = 'Password reset successfully. You can now sign in.';
+      ok.textContent = 'Password changed. Sign in with your new one.';
       form.reset();
       submit.hidden = true;
       main.appendChild(el('a', { class: 'btn primary block', href: '#/login' }, 'Continue to sign in'));
