@@ -51,6 +51,26 @@ const jsDir = path.join(DIST, 'app', 'js');
 const modules = fs.existsSync(jsDir) ? fs.readdirSync(jsDir).filter((f) => f.endsWith('.js')) : [];
 ok('/app/js/ has the WAC modules', modules.length > 20, 'found ' + modules.length);
 ok('/app/assets/ preserved', isDir(path.join('app', 'assets')), 'missing');
+// Path routing only works on this deployment if a deep path under /app/ serves
+// the shell. Without the rewrite Pages redirects every one of them to /app/ and
+// the app collapses to its root route.
+{
+  const r = has('_redirects') ? fs.readFileSync(path.join(DIST, '_redirects'), 'utf8') : '';
+  ok('_redirects rewrites /app/* to the shell', /\/app\/\*\s+\/app\/index\.html\s+200/.test(r),
+    'missing: ' + JSON.stringify(r.trim()));
+  // The mount fix is what makes those routes resolve at all under /app/.
+  ok('app client derives its mount point', has('app/js/nav.js') &&
+    /mountPoint/.test(fs.readFileSync(path.join(DIST, 'app', 'js', 'nav.js'), 'utf8')),
+    'app/js/nav.js has no mount derivation');
+  // Overrides have to survive a rebuild, so assert the result rather than the
+  // mechanism: the version block the terms promise must be in the built pages.
+  // has() re-roots at dist/, so it takes a path relative to it.
+  for (const f of ['terms', 'privacy']) {
+    const rel = f + '.html';
+    ok(f + '.html states its version and effective date', has(rel) &&
+      /class="doc-meta"/.test(fs.readFileSync(path.join(DIST, rel), 'utf8')), 'no doc-meta block');
+  }
+}
 
 console.log('\n--- WAC module graph ---');
 const html = has(path.join('app', 'index.html')) ? fs.readFileSync(path.join(DIST, 'app', 'index.html'), 'utf8') : '';
