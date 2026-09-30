@@ -65,6 +65,23 @@ ok('/app/assets/ preserved', isDir(path.join('app', 'assets')), 'missing');
   // Overrides have to survive a rebuild, so assert the result rather than the
   // mechanism: the version block the terms promise must be in the built pages.
   // has() re-roots at dist/, so it takes a path relative to it.
+  // The writer and the reader of a route must agree on the prefix. Links keep
+  // it so they stay inside the app; the router takes it off so it can match.
+  // Shipping one without the other looks correct in a diff and breaks every
+  // deep link at runtime, so both are asserted.
+  ok('app router strips the mount', has('app/js/router.js') &&
+    /pathname\.startsWith\(BASE\)/.test(fs.readFileSync(path.join(DIST, 'app', 'js', 'router.js'), 'utf8')),
+    'app/js/router.js never removes BASE from the pathname');
+
+  // Without <base>, ./js/app.js on /app/settings resolves under that path and
+  // the app never boots. This is the difference between "the route is wrong"
+  // and "nothing loads at all".
+  {
+    const rel = 'app/index.html';
+    const h = has(rel) ? fs.readFileSync(path.join(DIST, rel), 'utf8') : '';
+    ok('app/index.html declares its mount', /<base\s+href=["']\/app\//i.test(h),
+      'no <base href="/app/"> in the built shell');
+  }
   for (const f of ['terms', 'privacy']) {
     const rel = f + '.html';
     ok(f + '.html states its version and effective date', has(rel) &&

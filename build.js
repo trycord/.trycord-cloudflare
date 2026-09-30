@@ -26,6 +26,11 @@ const ROOT = __dirname;
 const SRC = path.join(ROOT, '.build', 'src');
 const DIST = path.join(ROOT, 'dist');
 
+// Where this deployment mounts the app. A const declared next to the function
+// that reads it is in its temporal dead zone when the build runs, so it lives
+// with the other paths.
+const APP_MOUNT = (process.env.TRYCORD_APP_MOUNT || '/app').replace(/\/+$/, '');
+
 const git = (...args) => execFileSync('git', args, { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
 
 function fetchSource() {
@@ -116,6 +121,7 @@ function build() {
   // dist/ directly would be discarded by the next build, which is how a
   // corrected legal page quietly reverts.
   applyOverrides(path.join(ROOT, 'public-overrides'));
+  writeBaseHref(path.join(app, 'index.html'), APP_MOUNT);
 
   writeBackendConfig(path.join(app, 'backend.json'));
   writeSpaRedirects(path.join(DIST, '_redirects'));
@@ -129,6 +135,23 @@ function build() {
 // A 200 rewrite serves the shell for anything under /app/ that is not a real
 // file, so the router resolves it. Pages matches the filesystem before these
 // rules, so /app/js/app.js and /app/css/app.css are still served as themselves.
+// index.html loads its CSS and modules as ./css/app.css and ./js/app.js. A
+// relative URL resolves against the document, so on /app/settings the browser
+// asks for /app/settings/js/app.js, gets the shell back from the SPA rewrite,
+// and the app never boots at all. Every deep link was a blank page.
+//
+// <base> is the standard fix: it tells the document what the mount is, so
+// relative URLs resolve against it whichever route is on screen.
+function writeBaseHref(dest, mount) {
+  const html = fs.readFileSync(dest, 'utf8');
+  if (/<base\b/i.test(html)) return;
+  const at = html.indexOf('<head>');
+  if (at < 0) throw new Error('FATAL: no <head> in ' + dest);
+  const tag = '\n  <base href="' + mount + '/">\n';
+  fs.writeFileSync(dest, html.slice(0, at + 6) + tag + html.slice(at + 6));
+  process.stdout.write('  app/index.html: <base href="' + mount + '/">\n');
+}
+
 function applyOverrides(dir) {
   if (!fs.existsSync(dir)) return;
   let n = 0;
