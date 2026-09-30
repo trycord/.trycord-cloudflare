@@ -1,5 +1,16 @@
 
 
+/* Declared so the value can be interpolated. Without a syntax a custom property
+   is an inert token stream and transitions skip it, so the sidebar snapped open
+   and shut; with one, --ui-sidebar animates and every grid track built from it
+   follows. Browsers without @property snap instead, which is the old behaviour
+   and perfectly usable. */
+@property --ui-sidebar {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 240px;
+}
+
 :root {
   color-scheme: dark;
 
@@ -52,10 +63,15 @@
   --t-fs-2xl: clamp(2rem, 3.2vw, 2.9rem);
 
   --t-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
-  --t-fast: 120ms;
-  --t-med: 220ms;
-  --t-slow: 420ms;
+  /* A second curve for things that enter: it decelerates harder, so something
+     arriving reads as settling rather than sliding. */
+  --t-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-instant: 60ms;   /* press feedback, hover on small controls */
+  --t-fast: 120ms;     /* hovers, focus rings, small state changes */
+  --t-med: 220ms;      /* panels, menus, the sidebar */
+  --t-slow: 420ms;     /* reserved for the rare deliberate one */
   --t-spin: 0.7s;
+  --t-shimmer: 1.4s;
 
   --t-r-xs: 6px;
   --t-r-s: 8px;
@@ -140,7 +156,8 @@ html[data-density="roomy"] {
   --t-d-3: 12px; --t-d-4: 18px; --t-d-5: 24px; --t-d-6: 34px;
 }
 html[data-motion="reduced"] {
-  --t-fast: 0.001s; --t-med: 0.001s; --t-slow: 0.001s; --t-spin: 0.001s;
+  --t-instant: 0.001s; --t-fast: 0.001s; --t-med: 0.001s;
+  --t-slow: 0.001s; --t-spin: 0.001s; --t-shimmer: 0.001s;
 }
 
 html[data-theme="orthocord"] {
@@ -392,6 +409,469 @@ img { max-width: 100%; }
 }
 .skip-link:focus { left: 0; }
 
+/* ---- settings V2 -------------------------------------------------------
+   One layout for every settings surface: personal, community and admin.
+
+   The old arrangement was a horizontal pill row that wrapped past six items
+   (account), a sticky sidebar (community), and a third nav for admin. Each was
+   sized for the destinations it happened to have. This one is sized for all
+   twenty-odd, so adding a section does not mean re-laying out its neighbours.
+
+   Two columns from 900px, because below that a 240px nav beside the form
+   leaves the form about 130px wide. Below 900px the nav becomes a disclosure
+   above the content rather than a sidebar beside it. */
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: var(--ui-sidebar) minmax(0, 1fr);
+  gap: var(--t-d-6);
+  align-items: start;
+  width: 100%;
+}
+
+/* ---- the nav ---- */
+
+.settings-nav {
+  position: sticky;
+  top: var(--t-d-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-d-4);
+  min-width: 0;
+  max-height: calc(100dvh - var(--t-d-6));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Hidden above 900px, where the nav is already open and a sidebar. */
+.settings-nav__toggle { display: none; }
+
+.settings-nav__search { position: relative; flex: 0 0 auto; }
+.settings-nav__search .input {
+  width: 100%;
+  /* Room for the clear button, which sits over the field rather than beside
+     it so the field keeps the nav's full width. */
+  padding-right: 34px;
+}
+.settings-nav__search-clear {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--t-r-xs);
+  background: transparent;
+  color: var(--t-mut);
+  cursor: pointer;
+}
+.settings-nav__search-clear:hover { background: var(--t-base2); color: var(--t-txt); }
+.settings-nav__search-clear .ui-icon { width: 13px; height: 13px; }
+
+.settings-nav__groups { display: flex; flex-direction: column; gap: var(--t-d-4); }
+
+.settings-nav__heading {
+  margin: 0 0 var(--t-d-1);
+  padding-inline: var(--t-d-2);
+  font-size: var(--t-fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--t-mut);
+}
+
+.settings-nav__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--t-d-3);
+  min-height: 38px;
+  padding: var(--t-d-1) var(--t-d-2);
+  border-radius: var(--t-r-s);
+  color: var(--t-txt2);
+  text-decoration: none;
+  transition:
+    background var(--t-fast) var(--t-ease),
+    color var(--t-fast) var(--t-ease);
+}
+.settings-nav__item:hover {
+  background: color-mix(in srgb, var(--t-txt) 6%, transparent);
+  color: var(--t-txt);
+  text-decoration: none;
+}
+.settings-nav__item:focus-visible {
+  outline: 2px solid var(--t-accent);
+  outline-offset: -2px;
+}
+.settings-nav__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  color: var(--t-mut);
+  transition: color var(--t-fast) var(--t-ease);
+}
+.settings-nav__icon .ui-icon { width: 16px; height: 16px; }
+.settings-nav__item:hover .settings-nav__icon { color: var(--t-txt2); }
+.settings-nav__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-fs-s);
+}
+
+/* The active marker is a bar drawn on the element itself, so switching section
+   moves two pixels of accent rather than repainting a filled block. */
+.settings-nav__item.is-active {
+  background: color-mix(in srgb, var(--t-accent) 12%, transparent);
+  color: var(--t-txt);
+  font-weight: 600;
+}
+.settings-nav__item.is-active .settings-nav__icon { color: var(--t-accent); }
+.settings-nav__item.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 60%;
+  transform: translateY(-50%);
+  border-radius: 0 2px 2px 0;
+  background: var(--t-accent);
+  animation: grow-in var(--t-fast) var(--t-ease);
+}
+@keyframes grow-in {
+  from { height: 0; opacity: 0; }
+  to { height: 60%; opacity: 1; }
+}
+
+.settings-nav__footer {
+  margin-top: var(--t-d-3);
+  padding-top: var(--t-d-3);
+  border-top: 1px solid var(--t-line);
+}
+.settings-nav__signout {
+  display: flex;
+  align-items: center;
+  gap: var(--t-d-2);
+  width: 100%;
+  min-height: 36px;
+  padding: var(--t-d-1) var(--t-d-2);
+  border: 0;
+  border-radius: var(--t-r-s);
+  background: transparent;
+  color: var(--t-err);
+  font-size: var(--t-fs-s);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--t-ease);
+}
+.settings-nav__signout:hover {
+  background: color-mix(in srgb, var(--t-err) 12%, transparent);
+}
+
+.settings-nav__empty {
+  margin: 0;
+  padding: var(--t-d-3);
+  font-size: var(--t-fs-s);
+  color: var(--t-mut);
+}
+
+/* ---- the content pane ---- */
+
+.settings-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--t-d-5);
+  min-width: 0;
+  /* The content measure is narrower than a conversation's: a settings form read
+     across a 1600px pane has its label and its control at opposite ends of the
+     screen. */
+  max-width: 780px;
+}
+
+.set-head { display: flex; align-items: flex-start; gap: var(--t-d-4); }
+.set-head__text { min-width: 0; flex: 1 1 auto; }
+.set-head__title {
+  margin: 0;
+  font-size: var(--t-fs-xl);
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  color: var(--t-txt);
+}
+.set-head__blurb {
+  margin: 4px 0 0;
+  font-size: var(--t-fs-s);
+  color: var(--t-mut);
+}
+.set-head__actions { display: flex; gap: var(--t-d-2); flex: 0 0 auto; }
+
+.set-card {
+  border: 1px solid var(--t-line);
+  border-radius: var(--t-r-m);
+  background: var(--t-base);
+  overflow: hidden;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: var(--t-d-4);
+  padding: var(--t-d-3) var(--t-d-4);
+  border-bottom: 1px solid var(--t-line);
+}
+.set-row:last-child { border-bottom: 0; }
+.set-row__text { min-width: 0; flex: 1 1 auto; }
+.set-row__label { font-size: var(--t-fs-m); font-weight: 600; color: var(--t-txt); }
+.set-row__hint { margin-top: 2px; font-size: var(--t-fs-xs); color: var(--t-mut); }
+/* Controls get a fixed share rather than growing, so a long label and a select
+   cannot push each other around between renders. */
+.set-row__control {
+  flex: 0 0 auto;
+  max-width: 46%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--t-d-2);
+}
+.set-row__control .input { width: 100%; min-width: 0; }
+.set-row.is-danger .set-row__label { color: var(--t-err); }
+
+.set-note {
+  margin: 0;
+  padding: var(--t-d-3) var(--t-d-4);
+  border: 1px solid var(--t-line);
+  border-left: 3px solid var(--t-accent);
+  border-radius: var(--t-r-s);
+  background: var(--t-base);
+  font-size: var(--t-fs-s);
+  color: var(--t-txt2);
+}
+.set-note--warn { border-left-color: var(--t-warn); }
+.set-note--danger { border-left-color: var(--t-err); }
+
+.set-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--t-d-3);
+  padding: var(--t-d-6) var(--t-d-4);
+  border: 1px dashed var(--t-line);
+  border-radius: var(--t-r-m);
+  text-align: center;
+}
+
+.set-danger {
+  border: 1px solid color-mix(in srgb, var(--t-err) 40%, var(--t-line));
+  border-radius: var(--t-r-m);
+  background: color-mix(in srgb, var(--t-err) 6%, transparent);
+  overflow: hidden;
+}
+.set-danger__head { padding: var(--t-d-4) var(--t-d-4) 0; }
+.set-danger__title {
+  margin: 0;
+  font-size: var(--t-fs-m);
+  font-weight: 700;
+  color: var(--t-err);
+}
+.set-danger__blurb { margin: 4px 0 0; font-size: var(--t-fs-s); color: var(--t-txt2); }
+.set-danger__body { padding: var(--t-d-3) var(--t-d-4) var(--t-d-4); }
+
+.set-actions { display: flex; flex-wrap: wrap; gap: var(--t-d-2); }
+
+.settings-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-d-2);
+  margin-bottom: var(--t-d-4);
+  font-size: var(--t-fs-s);
+  color: var(--t-mut);
+}
+.settings-back:hover { color: var(--t-txt); text-decoration: none; }
+.settings-back .ui-icon { width: 13px; height: 13px; transform: rotate(45deg); }
+
+/* ---- the switch, drawn rather than borrowed ---- */
+
+.switch { display: inline-flex; align-items: center; cursor: pointer; }
+.switch__input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch__track {
+  position: relative;
+  display: block;
+  width: 40px;
+  height: 23px;
+  border-radius: 999px;
+  background: var(--t-base2);
+  border: 1px solid var(--t-line);
+  transition: background var(--t-fast) var(--t-ease), border-color var(--t-fast) var(--t-ease);
+}
+.switch__thumb {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--t-txt2);
+  /* transform rather than left: the thumb slides without a layout pass. */
+  transform: translate(0, -50%);
+  transition: transform var(--t-fast) var(--t-ease), background var(--t-fast) var(--t-ease);
+}
+.switch__input:checked + .switch__track {
+  background: color-mix(in srgb, var(--t-accent) 70%, transparent);
+  border-color: var(--t-accent);
+}
+.switch__input:checked + .switch__track .switch__thumb {
+  transform: translate(17px, -50%);
+  background: var(--t-on-accent);
+}
+.switch__input:focus-visible + .switch__track {
+  outline: 2px solid var(--t-accent);
+  outline-offset: 2px;
+}
+.switch__input:disabled + .switch__track { opacity: 0.5; cursor: not-allowed; }
+
+/* ---- narrower: the nav stops being a sidebar ---- */
+
+@media (max-width: 899px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); gap: var(--t-d-4); }
+
+  /* A disclosure rather than a scroller: a horizontal strip of twenty sections
+     is a strip you have to scroll sideways to discover, and it hides which
+     section you are in. */
+  .settings-nav {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    border: 1px solid var(--t-line);
+    border-radius: var(--t-r-m);
+    background: var(--t-base);
+    padding: var(--t-d-2);
+    gap: var(--t-d-2);
+  }
+  .settings-nav__groups {
+    /* Collapsed by default on a phone: the section you opened is the one you
+       want, and the list is eleven items of chrome above it. */
+    display: none;
+  }
+  .settings-nav.is-open .settings-nav__groups { display: flex; }
+  .settings-nav.is-open .settings-nav__empty { display: block; }
+
+  .settings-nav__toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--t-d-2);
+    width: 100%;
+    min-height: 40px;
+    padding: var(--t-d-2);
+    border: 0;
+    border-radius: var(--t-r-s);
+    background: transparent;
+    color: var(--t-txt);
+    font-size: var(--t-fs-s);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--t-fast) var(--t-ease);
+  }
+  .settings-nav__toggle:hover { background: color-mix(in srgb, var(--t-txt) 6%, transparent); }
+  .settings-nav__toggle-icon { display: inline-flex; color: var(--t-mut); }
+  .settings-nav__toggle-icon .ui-icon { width: 15px; height: 15px; }
+  .settings-nav__toggle-caret { margin-left: auto; color: var(--t-mut); }
+  .settings-nav__toggle-caret .ui-icon { width: 14px; height: 14px; transform: rotate(90deg); }
+  .settings-nav__toggle[aria-expanded="true"] .settings-nav__toggle-caret .ui-icon {
+    transform: rotate(-90deg);
+  }
+  /* The caret turns with the disclosure rather than swapping glyphs. */
+  .settings-nav__toggle-caret .ui-icon { transition: transform var(--t-fast) var(--t-ease); }
+
+  .set-row { flex-direction: column; align-items: stretch; gap: var(--t-d-2); }
+  .set-row__control { max-width: none; justify-content: flex-start; }
+  .set-row__control .input { width: 100%; }
+  .set-head { flex-direction: column; gap: var(--t-d-3); }
+}
+
+/* ---- motion vocabulary -------------------------------------------------
+   Every entrance in the app is one of these four, so nothing invents its own
+   duration or curve. They animate only transform and opacity, never a
+   measured property, so they run on the compositor and cost no layout.
+
+   Deliberately short. The slowest is 220ms, which is under the threshold where
+   motion starts to feel like waiting; anything longer would make a fast action
+   look slow rather than responsive. */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Arrives from slightly below and settles. Used for panels and view roots. */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Arrives from a 2% undersize rather than sliding, for anything that opens out
+   of a control: menus, popovers, the rail's menus. */
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* One step, no loop. For a reaction landing or a pin taking hold. */
+@keyframes settle {
+  0% { transform: scale(1); }
+  38% { transform: scale(1.14); }
+  100% { transform: scale(1); }
+}
+
+/* A skeleton travelling across a placeholder. The only looping animation in
+   the app, and it runs on at most a handful of elements at a time. */
+@keyframes shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+/* Opacity only, for anything that pulses because it is waiting. */
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* Exits. Paired with the entrances above so a dismissal is as quick as an
+   arrival; a dialog that left on a 220ms fade would feel sluggish to close. */
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes pop-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.97); }
+}
+
+@keyframes drop-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(4px); }
+}
+
+/* An error arriving. Two small steps and no displacement, so it reads as the
+   field objecting rather than as the layout shifting. */
+@keyframes reject {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
 /* ---- application shell ------------------------------------------------
    One grid, two layouts. Wide viewports put the rail and the place sidebar
    beside the main area; narrow ones move the whole rail off-canvas and give
@@ -413,6 +893,10 @@ img { max-width: 100%; }
   display: grid;
   grid-template-columns: var(--ui-shell-cols);
   grid-template-rows: var(--ui-shell-rows);
+  /* The track list interpolates because the collapsed state keeps three tracks
+     and only changes the middle one's length. Swapping the list for a
+     two-track one could not animate, which is why it is not done that way. */
+  transition: grid-template-columns var(--t-med) var(--t-ease);
   height: 100dvh;
   width: 100%;
   overflow: hidden;
@@ -460,6 +944,8 @@ img { max-width: 100%; }
 .context-sidebar {
   grid-column: 2;
   grid-row: 1 / -1;
+  opacity: 1;
+  transition: opacity var(--t-med) var(--t-ease) 40ms;
 }
 
 /* User bar pinned to the bottom of the context sidebar. One component for
@@ -545,10 +1031,16 @@ img { max-width: 100%; }
 
 /* Collapsing the place sidebar. Removing the column is what gives the width
    back, so the track changes rather than the sidebar merely being hidden. */
-.shell.sidebar-collapsed { --ui-shell-cols: var(--ui-rail) minmax(0, 1fr); }
-.shell.sidebar-collapsed .context-sidebar,
+/* Collapsed: the sidebar track goes to zero rather than disappearing from the
+   list, so the grid animates between two same-shaped track lists and the main
+   area slides rather than jumping. The sidebar itself is clipped by its own
+   overflow, so nothing spills into the collapsed space. */
+.shell.sidebar-collapsed { --ui-sidebar: 0px; }
+.shell.sidebar-collapsed .context-sidebar {
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--t-ease);
+}
 .shell.sidebar-collapsed .rail-identity { display: none; }
-.shell.sidebar-collapsed .main-content { grid-column: 2; }
 /* Collapsing must not cap the content measure: give the extra width back. */
 .shell.sidebar-collapsed .view-root > .page,
 .shell.sidebar-collapsed .view-root > .conversation,
@@ -918,7 +1410,21 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
   line-height: 1.5;
   text-align: center;
 }
+/* The active rail button. opacity and a small scale rather than a background
+   swap, so the icon under the finger does not jump. */
+.rail-nav-item {
+  transition:
+    background var(--t-fast) var(--t-ease),
+    color var(--t-fast) var(--t-ease),
+    transform var(--t-instant) var(--t-ease),
+    border-radius var(--t-fast) var(--t-ease);
+}
+.rail-nav-item:active { transform: scale(0.94); }
+.rail-nav-item.active {
+  animation: settle var(--t-med) var(--t-ease);
+}
 .rail-nav-item.active .rail-nav-badge,
+
 .server-chip.active .rail-nav-badge {
   background: var(--t-on-accent);
   color: var(--t-accent);
@@ -1010,6 +1516,7 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
   position: fixed !important;
   inset: 0 !important;
   background: var(--t-backdrop);
+  animation: fade-in var(--t-fast) var(--t-ease);
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -1026,14 +1533,11 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
   border-radius: var(--t-r-l);
   padding: var(--t-d-5);
   box-shadow: var(--t-sh-2);
-  animation: rise var(--t-med) var(--t-ease);
+  animation: pop-in var(--t-med) var(--t-ease);
+  transform-origin: center;
 }
 .modal h2, .modal h3 { margin: 0 0 var(--t-d-3); letter-spacing: -0.01em; }
 .modal p { color: var(--t-txt2); }
-@keyframes rise {
-  from { opacity: 0.4; transform: translateY(14px) scale(0.98); }
-  to   { opacity: 1; transform: none; }
-}
 
 .popover-root { position: relative; z-index: var(--z-popover); }
 .popover {
@@ -1046,7 +1550,6 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
   border-radius: var(--t-r-m);
   padding: 6px;
   box-shadow: var(--t-sh-1);
-  animation: rise var(--t-fast) var(--t-ease);
 }
 /* Context menu: a popover carrying menu semantics. Items align in a single
    column and support keyboard focus traversal.
@@ -1138,17 +1641,11 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
   padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
   border-radius: var(--t-r-l) var(--t-r-l) 0 0;
   border-bottom: 0;
-  animation: ctx-sheet-in 0.14s ease-out;
+  animation: rise-in var(--t-fast) var(--t-ease-out);
 }
 .popover.ctx-menu--sheet .pop-item { padding: 12px var(--t-d-3); font-size: var(--t-fs-m); }
 .popover.ctx-menu--sheet .pop-sep { margin: 8px 0; }
-@keyframes ctx-sheet-in {
-  from { transform: translateY(14px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .popover.ctx-menu--sheet { animation: none; }
-}
+
 .pop-item[disabled] { opacity: 0.45; cursor: default; }
 .pop-item[disabled]:hover { background: transparent; }
 /* Session footer pinned to the bottom of the place navigation
@@ -1331,7 +1828,7 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
   max-width: 360px;
   box-shadow: var(--t-sh-4);
   font-size: var(--t-fs-m);
-  animation: rise var(--t-med) var(--t-ease);
+  animation: rise-in var(--t-med) var(--t-ease-out);
 }
 .toast.error { border-left-color: var(--t-err); }
 .toast.ok   { border-left-color: var(--t-ok); }
@@ -1353,7 +1850,7 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
   align-items: center;
   gap: var(--t-d-2);
 }
-.connection-status.show { display: flex !important; animation: rise var(--t-fast); }
+.connection-status.show { display: flex !important; animation: rise-in var(--t-fast) var(--t-ease-out); }
 
 /* A failover notice is informational, not a warning: the session works, it is
    just talking to a different instance. The warn tokens the offline state uses
@@ -1556,9 +2053,17 @@ select.input { appearance: auto; }
   text-align: left;
   border: 1px solid transparent;
   background: transparent;
-  transition: background var(--t-fast) var(--t-ease), border-color var(--t-fast) var(--t-ease);
+  /* color and background can be transitioned without a layout pass; nothing
+     measured is in this list. */
+  transition:
+    background var(--t-fast) var(--t-ease),
+    border-color var(--t-fast) var(--t-ease),
+    color var(--t-fast) var(--t-ease),
+    transform var(--t-instant) var(--t-ease);
 }
 .row:hover { background: color-mix(in srgb, var(--t-txt) 5%, transparent); color: var(--t-txt); }
+.row--channel.active,
+.row--nav.active { transform: translateX(2px); }
 .row.active { background: color-mix(in srgb, var(--t-accent) 13%, transparent); color: var(--t-txt); }
 
 .row--surface {
@@ -2175,53 +2680,6 @@ html:is(
    needs the shell's chrome out of the way rather than a different shell. */
 html[data-auth-page] .mobile-tab-navigation { display: none; }
 
-.settings-nav { display: flex; gap: var(--t-d-2); flex-wrap: wrap; margin-bottom: var(--t-d-5); padding: 4px; background: var(--t-base); border: 1px solid var(--t-line); border-radius: var(--t-r-s); width: max-content; max-width: 100%; }
-.settings-nav .btn { border: 0; background: transparent; }
-.settings-nav .btn.active { background: var(--t-accent); color: var(--t-on-accent); }
-.page.atrium.settings-layout { display: grid; grid-template-columns: var(--ui-sidebar) minmax(0, 1fr); gap: var(--t-d-5); align-items: start; }
-.settings-layout > .settings-nav {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 2px;
-  width: 100%;
-  margin-bottom: 0;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  position: sticky;
-  top: var(--t-d-4);
-}
-.settings-layout > .settings-nav .btn {
-  justify-content: flex-start;
-  width: 100%;
-  padding: 9px 12px;
-  border-radius: var(--t-r-s);
-  color: var(--t-txt2);
-  font-weight: 600;
-}
-.settings-layout > .settings-nav .btn:hover { background: var(--t-base2); color: var(--t-txt); }
-.settings-layout > .settings-nav .btn.active { background: color-mix(in srgb, var(--t-accent) 16%, transparent); color: var(--t-txt); }
-.settings-layout > .settings-nav .settings-signout { margin-top: 10px; color: var(--t-err); }
-.settings-layout > .settings-nav .settings-signout:hover { background: color-mix(in srgb, var(--t-err) 12%, transparent); color: var(--t-err); }
-.settings-body { min-width: 0; display: flex; flex-direction: column; gap: var(--t-d-5); }
-.settings-body > .card--auth:first-child { margin-top: 0; }
-.settings-body .profile-editor {
-  width: 100%;
-  max-width: 100%;
-}
-.section-label.danger { color: var(--t-err); }
-@media (max-width: 900px) {
-  .settings-layout { grid-template-columns: 1fr; }
-  .settings-layout > .settings-nav {
-    position: static;
-    flex-direction: row;
-    flex-wrap: wrap;
-    width: 100%;
-    gap: 4px;
-  }
-  .settings-layout > .settings-nav .btn { width: auto; }
-  .settings-layout > .settings-nav .settings-signout { margin-top: 0; margin-left: auto; }
-}
 
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--t-d-3); }
 .theme-chip {
@@ -2791,7 +3249,18 @@ html[data-auth-page] .mobile-tab-navigation { display: none; }
   align-items: center;
   gap: 3px;
 }
-.mobile-tab-navigation button .micon { font-size: 1.15rem; line-height: 1; }
+.mobile-tab-navigation button {
+  transition:
+    color var(--t-fast) var(--t-ease),
+    transform var(--t-instant) var(--t-ease);
+}
+.mobile-tab-navigation button:active { transform: scale(0.94); }
+.mobile-tab-navigation button .micon {
+  font-size: 1.15rem;
+  line-height: 1;
+  transition: transform var(--t-fast) var(--t-ease);
+}
+.mobile-tab-navigation button.active .micon { transform: translateY(-1px) scale(1.06); }
 .mobile-tab-navigation button.active {
   color: var(--t-accent);
   background: color-mix(in srgb, var(--t-accent) 8%, transparent);
@@ -3201,8 +3670,16 @@ html[data-route^="/verify-email/"] .mobile-tab-navigation { display: none !impor
 
 button > .ui-icon:only-child { display: block; margin: 0 auto; }
 .nav-group__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-group__list { display: flex; flex-direction: column; gap: 1px; }
+.nav-group__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: rise-in var(--t-fast) var(--t-ease);
+}
 .nav-group.is-collapsed .nav-group__list { display: none; }
+.nav-group__head {
+  transition: background var(--t-fast) var(--t-ease), color var(--t-fast) var(--t-ease);
+}
 .nav-group__action {
   flex: 0 0 auto;
   width: 20px;
