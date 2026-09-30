@@ -175,5 +175,21 @@ if (!fs.existsSync(wrangler)) {
   }
 }
 
+// The Worker is this deployment's routing layer, and its fallback condition was
+// wrong in a way no static check would catch: the asset binding answers an
+// unknown path with a redirect, not a 404, so `status !== 404` returned the
+// redirect and never reached the shell.
+{
+  const w = fs.readFileSync(path.join(ROOT, 'cloudflare', 'worker.js'), 'utf8');
+  ok('worker falls back on !ok, not on status !== 404',
+    /response\.ok/.test(w) && !/response\.status !== 404/.test(w),
+    'the redirect answer will be returned as if it were the asset');
+  ok('worker fetches the shell as /app/, not /app/index.html',
+    /\/app\/index\.html/.test(w) === false || /\/app\/'\)/.test(w),
+    'an explicit index file is redirected to its directory');
+  ok('worker sends auth aliases into the app', /\/login/.test(w) && /\/app\/login/.test(w),
+    'no /login -> /app/login mapping');
+}
+
 console.log(`\nverify-dist: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
