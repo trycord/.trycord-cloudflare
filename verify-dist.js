@@ -55,9 +55,22 @@ ok('/app/assets/ preserved', isDir(path.join('app', 'assets')), 'missing');
 // the shell. Without the rewrite Pages redirects every one of them to /app/ and
 // the app collapses to its root route.
 {
-  const r = has('_redirects') ? fs.readFileSync(path.join(DIST, '_redirects'), 'utf8') : '';
-  ok('_redirects rewrites /app/* to the shell', /\/app\/\*\s+\/app\/index\.html\s+200/.test(r),
-    'missing: ' + JSON.stringify(r.trim()));
+  // The Worker is this deployment's routing layer: it already falls back to
+  // /app/index.html for an unknown /app/* path. A _redirects file was added
+  // alongside it and wrangler refused to deploy - '/app/*' matches its own
+  // target '/app/index.html', which the validator reads as an infinite loop.
+  // So the rule lives in exactly one place, and that place is the Worker.
+  ok('no _redirects: the Worker owns the /app/* fallback', !has('_redirects'),
+    'a _redirects here is both redundant and rejected by wrangler');
+  {
+    const w = path.join(ROOT, 'cloudflare', 'worker.js');
+    const src = has(path.relative(ROOT, w)) || fs.existsSync(w) ? fs.readFileSync(w, 'utf8') : '';
+    ok('worker.js falls back to the app shell for /app/*',
+      /path\.startsWith\(\s*['"]\/app\//.test(src) && /\/app\/index\.html/.test(src),
+      'no /app/* fallback in cloudflare/worker.js');
+    ok('worker.js serves real /app assets before falling back',
+      /status !== 404/.test(src), 'asset-first lookup missing from the worker');
+  }
   // The mount fix is what makes those routes resolve at all under /app/.
   ok('app client derives its mount point', has('app/js/nav.js') &&
     /mountPoint/.test(fs.readFileSync(path.join(DIST, 'app', 'js', 'nav.js'), 'utf8')),
