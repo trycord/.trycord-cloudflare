@@ -15,6 +15,24 @@ const DIST = path.join(ROOT, 'dist');
 let pass = 0, fail = 0;
 const ok = (n, c, d) => { c ? pass++ : fail++; console.log((c ? '  ok   ' : ' FAIL  ') + n + (c ? '' : '  -> ' + d)); };
 const has = (p) => fs.existsSync(path.join(DIST, p));
+
+// Every file under a directory, so a check can cover the whole tree rather than
+// a hand-kept list of the files it happened to remember.
+function walkFiles(dir, ext) {
+  const out = [];
+  const stack = [dir];
+  while (stack.length) {
+    const d = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) stack.push(full);
+      else if (!ext || full.endsWith(ext)) out.push(full);
+    }
+  }
+  return out;
+}
 // Relative to dist/ unless given an absolute path. Accepting an absolute path
 // matters: the Wrangler checks below resolve against the repo root, and a
 // helper that silently re-rooted them at dist/ reported a directory that
@@ -212,6 +230,27 @@ if (!fs.existsSync(wrangler)) {
   }
   ok('every configured backend host resolves', bad.length === 0,
     'unreachable: ' + bad.join(', '));
+}
+
+// Every "Open the app" call to action must address the app, not the site root.
+// On this deployment the root is the marketing site, so a link to "/" lands the
+// reader on the homepage instead of in the application. It was inconsistent -
+// terms, privacy and support were correct and the rest were not - and nothing
+// caught the difference, because both destinations are valid pages.
+{
+  const offenders = [];
+  for (const f of walkFiles(path.join(DIST), '.html')) {
+    const html = fs.readFileSync(f, 'utf8');
+    const re = /<a[^>]*href="([^"]*)"[^>]*>\s*Open the app\s*<\/a>/gi;
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      if (m[1] !== '/app/' && m[1] !== '/app') {
+        offenders.push(path.relative(DIST, f) + ' -> ' + m[1]);
+      }
+    }
+  }
+  ok('every "Open the app" links to /app/', offenders.length === 0,
+    offenders.slice(0, 5).join(', '));
 }
 
 // The Worker is this deployment's routing layer, and its fallback condition was
