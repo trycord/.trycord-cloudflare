@@ -33,8 +33,17 @@ const APP_MOUNT = (process.env.TRYCORD_APP_MOUNT || '/app').replace(/\/+$/, '');
 
 const git = (...args) => execFileSync('git', args, { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
 
+// A commit id is not a ref name, so `git clone --branch <sha>` cannot take one.
+// The documented TRYCORD_REF=<sha> mode used to be passed straight to --branch,
+// which meant a pinned build failed on a cold clone and only worked if a warm
+// checkout happened to exist - the opposite of what pinning is for. A commit is
+// therefore cloned without checking anything out and then fetched by id, which
+// every host supports for a reachable commit.
+const looksLikeSha = /^[0-9a-f]{7,40}$/i.test(REF);
+
 function fetchSource() {
   const isLocal = !/^(https?:|git@|ssh:)/.test(REPO);
+  const bare = isLocal || looksLikeSha;
   if (!fs.existsSync(path.join(SRC, '.git'))) {
     fs.rmSync(SRC, { recursive: true, force: true });
     fs.mkdirSync(path.dirname(SRC), { recursive: true });
@@ -43,6 +52,10 @@ function fetchSource() {
     // fetch, so it is cloned whole and then checked out.
     if (isLocal) {
       git('clone', '--quiet', REPO, SRC);
+    } else if (looksLikeSha) {
+      // Nothing is checked out yet, so the commit still has to be fetched.
+      git('clone', '--quiet', '--filter=blob:none', '--no-checkout', REPO, SRC);
+      git('-C', SRC, 'fetch', '--quiet', '--depth', '1', 'origin', REF);
     } else {
       git('clone', '--quiet', '--depth', '1', '--branch', REF, REPO, SRC);
     }
@@ -50,11 +63,13 @@ function fetchSource() {
     process.stdout.write(`updating source to ${REF}\n`);
     if (isLocal) {
       git('-C', SRC, 'fetch', '--quiet', 'origin');
+    } else if (looksLikeSha) {
+      git('-C', SRC, 'fetch', '--quiet', '--depth', '1', 'origin', REF);
     } else {
       git('-C', SRC, 'fetch', '--quiet', '--depth', '1', 'origin', REF);
-      git('-C', SRC, 'checkout', '--quiet', 'FETCH_HEAD');
     }
   }
+  if (looksLikeSha) git('-C', SRC, 'checkout', '--quiet', 'FETCH_HEAD');
   git('-C', SRC, 'checkout', '--quiet', '--force', REF);
   const head = git('-C', SRC, 'rev-parse', 'HEAD');
   process.stdout.write(`source at ${head}\n`);
