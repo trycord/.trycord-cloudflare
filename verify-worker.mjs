@@ -1,14 +1,20 @@
-// TEMP: exercise the real cloudflare/worker.js against a simulation of the
-// Cloudflare ASSETS binding, and check every route.
+// Exercises the real cloudflare/worker.js against a simulation of the
+// Cloudflare ASSETS binding, and checks every route.
 //
-// The simulation reproduces the behaviour that caused this bug, taken from the
-// live site rather than assumed:
+// The simulation reproduces the behaviour that caused the original bug, taken
+// from the live site rather than assumed:
 //
 //   /app/index.html      -> 307 to /app/     (asset binding strips the index)
 //   /app/settings        -> 307 to /app/     (unknown under a directory)
-//   /app/js/app.js       -> 200              (a real file)
+//   /app/js/main.js      -> 200              (a real file)
 //
 // A fallback written as `status !== 404` therefore never fires.
+//
+// It also covers the two surfaces that share this origin: the public website at
+// the root, the Desktop app under /app/, and the Mobile app under /app/mobile/.
+// The asset/route boundary is asserted on both app surfaces, because the origin
+// (backend/src/serve-client.js) draws it and the static host has to agree: a
+// missing .js must be a 404, never the shell.
 
 import fs from 'fs';
 import path from 'path';
@@ -98,8 +104,13 @@ async function hit(pathname) {
   return {
     status: res.status,
     location: res.headers.get('location') || '',
-    shell: body.includes('id="shell"'),
+    // The Desktop entry carries `id="app"` on its mount node and no platform
+    // attribute; the Mobile entry declares `data-platform="mobile"`. They are
+    // two documents, so the checks below tell them apart the way a reader does.
+    desktop: body.includes('id="app"') && !body.includes('data-platform="mobile"'),
+    mobile: body.includes('data-platform="mobile"'),
     base: (body.match(/<base href="[^"]*">/) || [''])[0],
+    type: res.headers.get('content-type') || '',
   };
 }
 
@@ -108,23 +119,32 @@ let bad = 0;
 const fail = (m) => { ok(false, m); bad++; };
 
 console.log('\n--- public site must be untouched ---');
-for (const [p, f] of Object.entries({ '/': 'index.html', '/features': 'features.html', '/docs': 'docs.html',
-  '/download': 'download.html', '/about': 'about.html', '/support': 'support.html', '/security': 'security.html',
-  '/status': 'status.html', '/privacy': 'privacy.html', '/terms': 'terms.html',
-  '/trust-and-safety': 'trust-and-safety.html', '/instances-terms': 'instances-terms.html' })) {
-  const r = await hit(p);
-  if (r.status !== 200 || r.shell) fail(p.padEnd(20) + 'status=' + r.status + ' shell=' + r.shell);
+{
+  let n = 0;
+  const PAGES = { '/': 'index.html', '/features': 'features.html', '/docs': 'docs.html',
+    '/download': 'download.html', '/about': 'about.html', '/support': 'support.html',
+    '/security': 'security.html', '/status': 'status.html', '/privacy': 'privacy.html',
+    '/terms': 'terms.html', '/trust-and-safety': 'trust-and-safety.html',
+    '/instances-terms': 'instances-terms.html' };
+  for (const p of Object.keys(PAGES)) {
+    const r = await hit(p);
+    if (r.status !== 200 || r.desktop || r.mobile) fail(p.padEnd(20) + 'status=' + r.status);
+    else n++;
+  }
+  ok(n === Object.keys(PAGES).length, n + ' public routes return their own page and never an app document');
 }
-ok(bad === 0, 'all 12 public routes return their own page and never the app shell');
 
 console.log('\n--- public assets still served ---');
-for (const p of ['/css/site.css', '/js/site.js', '/assets/trycord-logo.ico']) {
-  const r = await hit(p);
-  if (r.status !== 200) fail(p.padEnd(26) + 'status=' + r.status);
+{
+  let n = 0;
+  for (const p of ['/css/site.css', '/js/site.js', '/assets/trycord-logo.ico']) {
+    const r = await hit(p);
+    if (r.status === 200) n++; else fail(p.padEnd(26) + 'status=' + r.status);
+  }
+  ok(n === 3, 'public css/js/icons resolve');
 }
-ok(true, 'public css/js/icons resolve');
 
-console.log('\n--- the SPA fallback: every app route ---');
+console.log('\n--- the Desktop SPA fallback: every app route ---');
 const APP = ['/app/', '/app/home', '/app/dms', '/app/dms/abc', '/app/friends', '/app/notifications',
   '/app/menu', '/app/discover', '/app/support', '/app/settings', '/app/settings/privacy',
   '/app/settings/security', '/app/settings/appearance', '/app/settings/notifications',
@@ -134,46 +154,115 @@ const APP = ['/app/', '/app/home', '/app/dms', '/app/dms/abc', '/app/friends', '
   '/app/server/abc/settings', '/app/c/slug', '/app/c/slug/channel/general',
   '/app/users/abc', '/app/invite/CODE', '/app/servers/new', '/app/login', '/app/register', '/app/forgot',
   '/app/account', '/app/support/appeals'];
-let appBad = 0;
-for (const p of APP) {
-  const r = await hit(p);
-  if (r.status !== 200 || !r.shell) { fail(p.padEnd(34) + 'status=' + r.status + ' shell=' + r.shell); appBad++; }
+{
+  let n = 0;
+  for (const p of APP) {
+    const r = await hit(p);
+    if (r.status === 200 && r.desktop && r.base === '<base href="/app/">') n++;
+    else fail(p.padEnd(34) + 'status=' + r.status + ' desktop=' + r.desktop + ' base=' + r.base);
+  }
+  ok(n === APP.length, n + '/' + APP.length + ' Desktop routes return the shell with <base href="/app/">');
 }
-if (!appBad) ok(true, APP.length + ' app routes all return the shell with <base>');
 
-console.log('\n--- app assets must NOT be swallowed by the fallback ---');
-for (const p of ['/app/js/app.js', '/app/css/app.css', '/app/backend.json', '/app/js/nav.js']) {
-  const r = await hit(p);
-  const res2 = await worker.fetch(new Request('https://trycord.dev' + p), env);
-  if (res2.status !== 200) fail(p.padEnd(26) + 'status=' + res2.status);
+console.log('\n--- the Mobile module: its own document, its own base ---');
+const MOBILE = ['/app/mobile/', '/app/mobile/settings', '/app/mobile/settings/security',
+  '/app/mobile/home', '/app/mobile/dms', '/app/mobile/menu', '/app/mobile/discover',
+  '/app/mobile/notifications', '/app/mobile/admin', '/app/mobile/login',
+  '/app/mobile/register', '/app/mobile/forgot', '/app/mobile/support'];
+{
+  let n = 0;
+  for (const p of MOBILE) {
+    const r = await hit(p);
+    if (r.status === 200 && r.mobile && r.base === '<base href="/app/mobile/">') n++;
+    else fail(p.padEnd(34) + 'status=' + r.status + ' mobile=' + r.mobile + ' base=' + r.base);
+  }
+  ok(n === MOBILE.length, n + '/' + MOBILE.length + ' Mobile routes return the Mobile doc with <base href="/app/mobile/">');
 }
-ok(true, 'real app assets are returned as themselves');
+
+console.log('\n--- /app/mobile with no trailing slash ---');
+{
+  const r = await hit('/app/mobile');
+  if (!(r.status === 302 && r.location === 'https://trycord.dev/app/mobile/')) {
+    fail('/app/mobile -> ' + r.status + ' ' + r.location);
+  }
+  ok(r.status === 302, '/app/mobile redirects to /app/mobile/');
+}
+
+console.log('\n--- the origin-root /mobile alias ---');
+{
+  const want = {
+    '/mobile': 'https://trycord.dev/app/mobile/',
+    '/mobile/': 'https://trycord.dev/app/mobile/',
+    '/mobile/settings': 'https://trycord.dev/app/mobile/settings',
+    '/mobile/settings/security': 'https://trycord.dev/app/mobile/settings/security',
+  };
+  let n = 0;
+  for (const from of Object.keys(want)) {
+    const r = await hit(from);
+    if (r.status === 302 && r.location === want[from]) n++;
+    else fail(from.padEnd(28) + '-> ' + r.status + ' ' + r.location + ' (want 302 ' + want[from] + ')');
+  }
+  ok(n === Object.keys(want).length, '/mobile/* redirects onto the mounted Mobile location');
+}
+
+console.log('\n--- real assets must be returned as themselves ---');
+{
+  const DESKTOP_ASSETS = ['/app/js/main.js', '/app/css/app.css', '/app/backend.json',
+    '/app/packages/nav.js', '/app/assets/trycord-assets/brand/trycord-symbol.svg'];
+  const MOBILE_ASSETS = ['/app/mobile/js/main.js', '/app/mobile/css/app.css', '/app/mobile/backend.json',
+    // packages/ is shared at the client root, one directory up: the Mobile entry
+    // reaches it as ../../packages/..., so there is no /app/mobile/packages.
+    '/app/packages/brand.js', '/app/packages/nav.js'];
+  let n = 0;
+  for (const p of DESKTOP_ASSETS.concat(MOBILE_ASSETS)) {
+    const r = await hit(p);
+    if (r.status === 200 && !r.desktop && !r.mobile) n++;
+    else fail(p.padEnd(52) + 'status=' + r.status + ' (served as a document?)');
+  }
+  ok(n === DESKTOP_ASSETS.length + MOBILE_ASSETS.length, n + ' real assets are returned as themselves');
+}
+
+console.log('\n--- a missing asset is a 404, never the shell ---');
+{
+  const MISSES = ['/app/js/nope.js', '/app/js/app/missing.mjs', '/app/css/nope.css',
+    '/app/packages/nope.js', '/app/assets/nope.svg',
+    '/app/mobile/js/nope.js', '/app/mobile/css/nope.css', '/app/mobile/packages/nope.js'];
+  let n = 0;
+  for (const p of MISSES) {
+    const r = await hit(p);
+    if (r.status === 404 && !r.desktop && !r.mobile) n++;
+    else fail(p.padEnd(34) + 'status=' + r.status + ' desktop=' + r.desktop + ' mobile=' + r.mobile);
+  }
+  ok(n === MISSES.length, n + '/' + MISSES.length + ' missing assets under /app and /app/mobile return 404');
+}
+
+console.log('\n--- an extensionless app route still falls back to its own document ---');
+{
+  const r = await hit('/app/nope-not-real');
+  ok(r.status === 200 && r.desktop, '/app/nope-not-real -> the Desktop shell (route, not asset)');
+  const m = await hit('/app/mobile/nope-not-real');
+  ok(m.status === 200 && m.mobile, '/app/mobile/nope-not-real -> the Mobile document (route, not asset)');
+}
 
 console.log('\n--- auth aliases ---');
-for (const [from, to] of [['/login', '/app/login'], ['/register', '/app/register'], ['/forgot', '/app/forgot']]) {
-  const r = await hit(from);
-  const want = 'https://trycord.dev' + to;
-  if (!(r.status === 302 && r.location === want)) fail(from + ' -> ' + r.status + ' ' + r.location + ' (want 302 ' + want + ')');
+{
+  let n = 0;
+  for (const [from, to] of [['/login', '/app/login'], ['/register', '/app/register'], ['/forgot', '/app/forgot']]) {
+    const r = await hit(from);
+    const want = 'https://trycord.dev' + to;
+    if (r.status === 302 && r.location === want) n++;
+    else fail(from + ' -> ' + r.status + ' ' + r.location + ' (want 302 ' + want + ')');
+  }
+  ok(n === 3, '/login /register /forgot redirect into /app/*');
 }
-ok(true, '/login /register /forgot redirect into /app/*');
 
 console.log('\n--- /app with no trailing slash ---');
 {
   const r = await hit('/app');
-  if (!(r.status === 302 && r.location === 'https://trycord.dev/app/')) fail('/app -> ' + r.status + ' ' + r.location);
+  ok(r.status === 302 && r.location === 'https://trycord.dev/app/', '/app redirects to /app/');
 }
-ok(true, '/app redirects to /app/');
 
-console.log('\n--- genuine 404s still 404 ---');
-for (const p of ['/nothing-here', '/app/nope-not-real']) {
-  const r = await hit(p);
-  const isApp = p.startsWith('/app/');
-  if (isApp) { if (!r.shell) fail(p + ' under /app should get the shell'); }
-  else if (r.status !== 404) fail(p + ' returned ' + r.status + ' (want 404)');
-}
-ok(true, 'unknown root paths do not return the app');
-
-console.log('\n--- /nothing-here must be 404 with the page ---');
+console.log('\n--- unknown root paths 404 with the page ---');
 {
   const r = await hit('/nothing-here');
   ok(r.status === 404, '/nothing-here status=' + r.status + ' (want 404)');
