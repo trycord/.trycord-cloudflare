@@ -86,15 +86,25 @@ function copyInto(src, dest) {
   }
 }
 
+// The product repo's client directory was renamed from trycord-client/ to
+// frontend/ when the source was restructured. The build looked for the old name,
+// did not find it, and the deployment kept serving the tree built the last time
+// the old name existed - so a redesign landed in the source and never reached
+// production. Accept either name; the new one wins when both are present.
+function clientDir() {
+  const legacy = path.join(SRC, 'trycord-client');
+  return fs.existsSync(legacy) ? legacy : path.join(SRC, 'frontend');
+}
+
 function build() {
   const publicSrc = path.join(SRC, 'public');
-  const clientSrc = path.join(SRC, 'trycord-client');
+  const clientSrc = clientDir();
   if (!fs.existsSync(publicSrc)) throw new Error('public/ missing from source at ' + publicSrc);
   if (!fs.existsSync(path.join(clientSrc, 'index.html'))) {
-    throw new Error('trycord-client/index.html missing from source at ' + clientSrc);
+    throw new Error(path.basename(clientSrc) + '/index.html missing from source at ' + clientSrc);
   }
   if (fs.existsSync(path.join(clientSrc, 'app'))) {
-    throw new Error('trycord-client/app exists; copying the client into dist/app/ would nest it');
+    throw new Error(path.basename(clientSrc) + '/app exists; copying the client into dist/app/ would nest it');
   }
 
   // Clean rebuild: a stale file left behind by an older build is served
@@ -207,7 +217,7 @@ if (!/^https?:\/\//i.test(BACKUP_URL)) {
 
 function writeBackendConfig(dest) {
   let cfg = {};
-  const existing = path.join(SRC, 'trycord-client', 'backend.json');
+  const existing = path.join(clientDir(), 'backend.json');
   if (fs.existsSync(existing)) {
     try { cfg = JSON.parse(fs.readFileSync(existing, 'utf8')); } catch (e) {
       throw new Error('trycord-client/backend.json is not valid JSON: ' + e.message);

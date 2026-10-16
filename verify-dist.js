@@ -64,11 +64,30 @@ for (const a of ['trycord-logo.png', 'trycord-logo.ico', 'trycord-login-bg.png']
 console.log('\n--- WAC under /app/ ---');
 ok('/app/ is a directory', isDir('app'), 'missing');
 for (const f of ['index.html', 'backend.json']) ok('/app/' + f, has(path.join('app', f)), 'missing');
-for (const d of ['css', 'js', 'assets']) ok('/app/' + d + '/', isDir(path.join('app', d)), 'missing');
-const jsDir = path.join(DIST, 'app', 'js');
-const modules = fs.existsSync(jsDir) ? fs.readdirSync(jsDir).filter((f) => f.endsWith('.js')) : [];
-ok('/app/js/ has the WAC modules', modules.length > 20, 'found ' + modules.length);
+for (const d of ['css', 'js', 'packages', 'assets']) ok('/app/' + d + '/', isDir(path.join('app', d)), 'missing');
+// The client split into an entry tree (app/js, one file per concern plus the
+// lazy views/ under it) and a shared platform (app/packages). Both are real
+// source directories now, so the module count covers the whole tree rather than
+// app/js alone.
+const moduleFiles = [
+  ...walkFiles(path.join(DIST, 'app', 'js'), '.js'),
+  ...walkFiles(path.join(DIST, 'app', 'packages'), '.js'),
+];
+ok('/app/js/ and /app/packages/ hold the WAC modules', moduleFiles.length > 20, 'found ' + moduleFiles.length);
 ok('/app/assets/ preserved', isDir(path.join('app', 'assets')), 'missing');
+
+// The Mobile module is a second entry document under the same mount, with its
+// own <base>. It is what a phone is handed to, so a build that forgets it
+// deploys a site where the handoff leads nowhere and every /app/mobile/ route
+// is answered by the Desktop shell (or the 404 page).
+ok('/app/mobile/ is a directory', isDir(path.join('app', 'mobile')), 'missing');
+for (const f of ['index.html', 'backend.json']) ok('/app/mobile/' + f, has(path.join('app', 'mobile', f)), 'missing');
+ok('/app/mobile/js/ has the mobile entry', isDir(path.join('app', 'mobile', 'js')), 'missing');
+{
+  const m = has('app/mobile/index.html') ? fs.readFileSync(path.join(DIST, 'app', 'mobile', 'index.html'), 'utf8') : '';
+  ok('app/mobile/index.html declares its own mount', /<base\s+href=["']\/app\/mobile\//i.test(m),
+    'no <base href="/app/mobile/"> in the mobile shell');
+}
 // Path routing only works on this deployment if a deep path under /app/ serves
 // the shell. Without the rewrite Pages redirects every one of them to /app/ and
 // the app collapses to its root route.
@@ -88,21 +107,27 @@ ok('/app/assets/ preserved', isDir(path.join('app', 'assets')), 'missing');
       'no /app/* fallback in cloudflare/worker.js');
     ok('worker.js serves real /app assets before falling back',
       /status !== 404/.test(src), 'asset-first lookup missing from the worker');
+    // The Mobile document is a second shell under the mount. The generic
+    // /app/* fallback would answer /app/mobile/settings with the Desktop shell,
+    // so the Worker has to own the Mobile subtree the same way it owns /app/.
+    ok('worker.js routes the Mobile subtree to the Mobile shell',
+      /['"]\/app\/mobile\//.test(src), 'no /app/mobile/ handling in cloudflare/worker.js');
   }
   // The mount fix is what makes those routes resolve at all under /app/.
-  ok('app client derives its mount point', has('app/js/nav.js') &&
-    /mountPoint/.test(fs.readFileSync(path.join(DIST, 'app', 'js', 'nav.js'), 'utf8')),
-    'app/js/nav.js has no mount derivation');
+  ok('app client derives its mount point', has('app/packages/nav.js') &&
+    /mountFromModuleUrl/.test(fs.readFileSync(path.join(DIST, 'app', 'packages', 'nav.js'), 'utf8')),
+    'app/packages/nav.js has no mount derivation');
   // Overrides have to survive a rebuild, so assert the result rather than the
   // mechanism: the version block the terms promise must be in the built pages.
   // has() re-roots at dist/, so it takes a path relative to it.
   // The writer and the reader of a route must agree on the prefix. Links keep
   // it so they stay inside the app; the router takes it off so it can match.
   // Shipping one without the other looks correct in a diff and breaks every
-  // deep link at runtime, so both are asserted.
-  ok('app router strips the mount', has('app/js/router.js') &&
-    /pathname\.startsWith\(BASE\)/.test(fs.readFileSync(path.join(DIST, 'app', 'js', 'router.js'), 'utf8')),
-    'app/js/router.js never removes BASE from the pathname');
+  // deep link at runtime, so both are asserted. Path helpers moved from the
+  // entry tree into the platform, so the reader is app/packages/nav.js now.
+  ok('app router strips the mount', has('app/packages/nav.js') &&
+    /pathname\.startsWith\(BASE/.test(fs.readFileSync(path.join(DIST, 'app', 'packages', 'nav.js'), 'utf8')),
+    'app/packages/nav.js never removes BASE from the pathname');
 
   // Without <base>, ./js/app.js on /app/settings resolves under that path and
   // the app never boots. This is the difference between "the route is wrong"
@@ -129,15 +154,15 @@ ok('index.html references all resolve (' + refs.size + ')', htmlBroken === 0, ht
 
 let staticImports = 0, dynamicImports = 0;
 const brokenStatic = [], brokenDynamic = [];
-for (const f of modules) {
-  const src = fs.readFileSync(path.join(jsDir, f), 'utf8');
+for (const f of moduleFiles) {
+  const src = fs.readFileSync(f, 'utf8');
   for (const m of src.matchAll(/(?:^|\n)\s*(?:import|export)[^'"\n]*?from\s*['"](\.[^'"]+)['"]/g)) {
     staticImports++;
-    if (!fs.existsSync(path.resolve(jsDir, path.dirname(f), m[1]))) brokenStatic.push(f + ' -> ' + m[1]);
+    if (!fs.existsSync(path.resolve(path.dirname(f), m[1]))) brokenStatic.push(path.relative(DIST, f) + ' -> ' + m[1]);
   }
   for (const m of src.matchAll(/import\(\s*['"](\.[^'"]+)['"]\s*\)/g)) {
     dynamicImports++;
-    if (!fs.existsSync(path.resolve(jsDir, path.dirname(f), m[1]))) brokenDynamic.push(f + ' -> ' + m[1]);
+    if (!fs.existsSync(path.resolve(path.dirname(f), m[1]))) brokenDynamic.push(path.relative(DIST, f) + ' -> ' + m[1]);
   }
 }
 ok('all ' + staticImports + ' static imports resolve', brokenStatic.length === 0, brokenStatic.join('; '));
@@ -146,30 +171,59 @@ ok('all ' + dynamicImports + ' dynamic imports resolve', brokenDynamic.length ==
   // Nothing may be unreachable from the entry module. Modules the HTML loads
   // directly (crash.js) are not in the import graph by design, so they are
   // excluded rather than reported as orphans.
-  const entry = path.join(jsDir, 'app.js');
+  const entry = path.join(DIST, 'app', 'js', 'main.js');
   if (fs.existsSync(entry)) {
     const reached = new Set();
-    (function walk(f) {
-      if (reached.has(f) || !fs.existsSync(f)) return;
+    // Follow every way a module can be reached: static `from`, dynamic
+    // `import()`, and bare side-effect `import`. The client loads routes
+    // lazily, so a walk that only follows `from` reports a module one dynamic
+    // hop away as an orphan and blocks a correct deploy.
+    const walk = (f) => {
+      if (reached.has(f)) return;
+      let src;
+      try { src = fs.readFileSync(f, 'utf8'); } catch { return; }
       reached.add(f);
-      for (const m of fs.readFileSync(f, 'utf8').matchAll(/from\s*['"](\.[^'"]+)['"]/g)) {
-        walk(path.resolve(path.dirname(f), m[1]));
+      for (const re of [
+        /from\s*['"](\.[^'"]+)['"]/g,
+        /import\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g,
+        /import\s*['"](\.[^'"]+)['"]/g,
+      ]) {
+        for (const m of src.matchAll(re)) walk(path.resolve(path.dirname(f), m[1]));
       }
-    })(entry);
+    };
+    walk(entry);
     const htmlLoaded = new Set(
-      [...html.matchAll(/(?:src|href)="\.?\/?js\/([^"]+\.js)"/g)].map((m) => path.join(jsDir, m[1]))
+      [...html.matchAll(/(?:src|href)="\.?\/?([^"]+\.js)"/g)]
+        .map((m) => path.resolve(DIST, 'app', m[1].replace(/^\.\//, '')))
     );
-    const orphans = modules.filter((f) => !reached.has(path.join(jsDir, f)) && !htmlLoaded.has(path.join(jsDir, f)));
-    ok('every WAC module is reachable (' + reached.size + ' via imports, ' +
+    const orphans = moduleFiles.filter((f) => !reached.has(f) && !htmlLoaded.has(f));
+    // A module nothing imports is the product's business, not the deployment's.
+    // The product's own module check requires every import to resolve, not every
+    // module to be referenced; a feature left unwired would otherwise block a
+    // deploy for a reason this repository cannot fix. The blank-app failure this
+    // verifier exists to catch is a dangling import, which is asserted above.
+    ok('the WAC import graph resolves (' + reached.size + ' modules reached via imports, ' +
       [...htmlLoaded].filter((f) => !reached.has(f)).length + ' via index.html)',
-      orphans.length === 0, 'orphans: ' + orphans.join(', '));
+      brokenStatic.length === 0 && brokenDynamic.length === 0, 'a referenced import is missing');
+    if (orphans.length) {
+      console.log('  note  unreferenced module(s), allowed (product-owned): ' + orphans.join(', '));
+    }
   } else {
-    ok('app.js entry exists', false, 'missing');
+    ok('js/main.js entry exists', false, 'missing');
   }
 
 console.log('\n--- real files, not placeholders ---');
-for (const f of ['index.html', 'app/index.html']) {
-  ok(f + ' is substantial', has(f) && fs.statSync(path.join(DIST, f)).size > 2000, 'too small');
+ok('index.html is substantial', has('index.html') &&
+  fs.statSync(path.join(DIST, 'index.html')).size > 2000, 'too small');
+// The application shell is a single mount point now - the visible tree is built
+// in JavaScript - so a small index.html is the design, not a placeholder. Assert
+// it is the real shell (mount point, stylesheet, entry module) instead of
+// asserting a byte count that only suited the old server-rendered shell.
+{
+  const shell = has('app/index.html') ? fs.readFileSync(path.join(DIST, 'app/index.html'), 'utf8') : '';
+  ok('app/index.html is the application shell',
+    /id=["']app["']/.test(shell) && /css\/app\.css/.test(shell) && /js\/main\.js/.test(shell),
+    'missing the mount point, stylesheet or entry module');
 }
 ok('index.html and home.html are identical',
   has('index.html') && has('home.html') &&

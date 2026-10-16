@@ -70,6 +70,24 @@ export default {
       return env.ASSETS.fetch(new Request(new URL('/app/', request.url), request));
     }
 
+    // The Mobile module is a second entry document under the same mount, at
+    // /app/mobile/. It is its own shell with its own <base>, so a deep link
+    // inside it has to be answered with the Mobile document, not the Desktop
+    // one: the generic /app/* fallback below would hand a phone at
+    // /app/mobile/settings the Desktop shell, whose router has no such route,
+    // and the reader would see the not-found screen with the site chrome still
+    // around it. The directory path is a redirect to the trailing-slash form so
+    // the document and its <base> agree, exactly as /app is handled above.
+    if (path === '/app/mobile') {
+      return Response.redirect(new URL('/app/mobile/', request.url), 302);
+    }
+
+    if (path.startsWith('/app/mobile/')) {
+      const response = await env.ASSETS.fetch(request);
+      if (response.ok) return response;
+      return env.ASSETS.fetch(new Request(new URL('/app/mobile/', request.url), request));
+    }
+
     if (path.startsWith('/app/')) {
       const response = await env.ASSETS.fetch(request);
 
