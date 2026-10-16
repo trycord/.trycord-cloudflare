@@ -13,6 +13,24 @@
 // fallback written as `if (status !== 404)` never fires and every route in the
 // app bounces to /app/.
 
+// A path whose last segment carries a file extension is an asset, not a client
+// route. The origin draws the same line (serve-client.js: `/\.[a-z0-9]+$/`), and
+// it has to be drawn here too or the two hosts disagree: the generic fallback
+// below answers a missing module with the shell, so a typo or a stale reference
+// arrives at the browser as HTML where it expected JavaScript - a MIME/syntax
+// error a long way from the cause, instead of a 404 at the address that is wrong.
+const ASSET_PATH = /\.[a-z0-9]+$/i;
+
+// The public 404 page, with a 404 status. Fetching it plainly would return a 200
+// carrying the not-found page, so a client checking status would read a missing
+// path as a real one.
+async function notFound(request, env) {
+  const page = await env.ASSETS.fetch(
+    new Request(new URL('/404.html', request.url), request),
+  );
+  return new Response(page.body, { status: 404, headers: page.headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -30,6 +48,16 @@ export default {
     };
     if (AUTH_ALIASES[path]) {
       return Response.redirect(new URL(AUTH_ALIASES[path], request.url), 302);
+    }
+
+    // The origin also serves the Mobile module at the origin-root alias /mobile/
+    // (serve-client.js registers it beside /app/mobile/). Here the root belongs to
+    // the public website, so the alias is a redirect to the canonical mounted
+    // location rather than a second copy of the document - one place the base and
+    // the router agree, exactly as /app and /app/mobile are handled.
+    if (path === '/mobile' || path.startsWith('/mobile/')) {
+      const rest = path.slice('/mobile'.length).replace(/^\/+/, '');
+      return Response.redirect(new URL('/app/mobile/' + rest, request.url), 302);
     }
 
     // Public clean routes
@@ -85,6 +113,9 @@ export default {
     if (path.startsWith('/app/mobile/')) {
       const response = await env.ASSETS.fetch(request);
       if (response.ok) return response;
+      // A missing file is a 404; only an extensionless route falls back to the
+      // Mobile document.
+      if (ASSET_PATH.test(path)) return notFound(request, env);
       return env.ASSETS.fetch(new Request(new URL('/app/mobile/', request.url), request));
     }
 
@@ -94,6 +125,8 @@ export default {
       // `response.ok` rather than `status !== 404`: a real asset is a 2xx, and
       // everything else under /app/ is a client route.
       if (response.ok) return response;
+      // The same asset/route line as the origin and the Mobile branch above.
+      if (ASSET_PATH.test(path)) return notFound(request, env);
 
       return env.ASSETS.fetch(new Request(new URL('/app/', request.url), request));
     }
@@ -111,12 +144,6 @@ export default {
     // The 404 page, with a 404 status. Fetching it plainly would hand back a
     // 200 carrying the not-found page, so a crawler or a client checking status
     // would read a missing path as a real one.
-    const page = await env.ASSETS.fetch(
-      new Request(new URL('/404.html', request.url), request),
-    );
-    return new Response(page.body, {
-      status: 404,
-      headers: page.headers,
-    });
+    return notFound(request, env);
   },
 };
