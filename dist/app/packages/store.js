@@ -189,6 +189,17 @@ function clearCaches() {
   State.mutedChannels.clear();
 }
 
+// Forgets everything this browser knows about the instance it was reading.
+//
+// Switching instances is not a sign-out: the reader may keep the old account
+// and come back to it. But the communities, conversations, people and presence
+// held here belong to that instance alone, and carrying them into another
+// instance's workspace would show one server's data under another's name.
+export function clearInstanceState() {
+  clearCaches();
+  emit('instance-cleared', null);
+}
+
 export function ownJti() {
   const claims = tokenClaims();
   return claims && claims.jti ? String(claims.jti) : null;
@@ -314,10 +325,11 @@ export function dmById(id) {
 // The person on the other side of a one-to-one conversation.
 export function dmPeer(dm) {
   if (!dm) return null;
+  // The list answer carries the peer directly; older spells kept a users array.
   const users = dm.users || dm.participants || [];
   const me = State.user && State.user.id;
   const others = users.filter((u) => u.id !== me);
-  const peer = others.length ? others[0] : (users[0] || null);
+  const peer = dm.peer ? dm.peer : (others.length ? others[0] : (users[0] || null));
   return peer ? normalizeUser(peer) : null;
 }
 

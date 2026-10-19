@@ -13,12 +13,11 @@ import {
   signedIn,
 } from '../packages/store.js';
 import {
-  shellRoot, setStage, setStageHead, setComposer, setContextPanel, setPlaceNav,
+  shellRoot, setStage, setStageHead, setComposer, setInspector, setContextPage,
   setTitle, refreshChrome,
 } from './shell.js';
-import { buildSidebar } from './sidebars.js';
-import { failure } from './views/util.js';
-import { renderNotFound } from './views/plain.js';
+import { fault } from './ui/page.js';
+import { renderNotFound } from './features/documents.js';
 
 let activeCleanup = null;
 let rawNode = null;
@@ -65,26 +64,31 @@ function setRoute(route) {
 
 function paintNotFound(route) {
   clearRaw();
-  setPlaceNav(null);
+  // An unknown address is still inside the reader's own scope: the spine stays
+  // live and says so, instead of leaving an empty column next to the message.
+  setContextPage('home', null, null);
   const result = renderNotFound();
   setStageHead();
   setStage(result.node);
   setComposer(null);
-  setContextPanel(null);
+  setInspector(null);
   setTitle('Not found');
   setRoute(route);
   refreshChrome();
 }
 
-function paintError(route, error) {
+// A fault is never allowed to blank the place column: the reader is still
+// somewhere, and the spine still has to say where. The column is repainted from
+// the page that was being opened, falling back to the reader's own scope.
+function paintError(route, error, ctx, page) {
   clearRaw();
-  setPlaceNav(null);
-  const box = failure(error, () => run());
+  setContextPage(page && page.sidebar ? page.sidebar : 'home', ctx, page);
+  const box = fault(error, () => run());
   box.setAttribute('data-fault-origin', 'router');
   setStageHead();
   setStage(box);
   setComposer(null);
-  setContextPanel(null);
+  setInspector(null);
   setTitle('Something went wrong');
   setRoute(route);
 }
@@ -94,8 +98,8 @@ function paint(result, page, route) {
     setStageHead();
     setStage(null);
     setComposer(null);
-    setContextPanel(null);
-    setPlaceNav(null);
+    setInspector(null);
+    setContextPage(null, null, null);
     setTitle(result.title || page.label || '');
     showRaw(result.node);
     setRoute(route);
@@ -107,7 +111,7 @@ function paint(result, page, route) {
   else setStageHead();
   setStage(result && result.node);
   setComposer(result && result.composer);
-  setContextPanel(result && result.members);
+  setInspector(result && result.inspector);
   setTitle(page.label || page.nav && page.nav.label || '');
   setRoute(route);
   return true;
@@ -197,14 +201,17 @@ export async function run() {
   if (page.sidebar === 'community') {
     const serverId = await resolveServerId(page, params);
     if (seq !== generation) return;
-    if (!serverId) { paintError(route, new Error('That community does not exist.')); return; }
+    if (!serverId) { paintError(route, new Error('That community does not exist.'), ctx, page); return; }
     ctx.serverId = serverId;
     if (!serverById(serverId)) {
       try { await refreshServer(serverId); } catch { /* the view reports a missing community */ }
       if (seq !== generation) return;
     }
 
-    if (page.id === 'community' || page.id === 'community.legacy') {
+    // Only the bare community root lands on its first channel. The rest of the
+    // id-form URLs - /members, /settings/... - are pages of their own, and a
+    // redirect here would swallow them.
+    if ((page.id === 'community' || page.id === 'community.legacy') && match.rest.length === 0) {
       try { await refreshServerTree(serverId); } catch { /* handled below */ }
       if (seq !== generation) return;
       const channel = firstChannel(serverId);
@@ -212,6 +219,7 @@ export async function run() {
         navigate('/server/' + serverId + '/channel/' + channel.id, { replace: true });
         return;
       }
+      if (seq !== generation) return;
     } else if (page.id === 'community.channel' || page.id === 'community.channelPins') {
       try { await refreshServerTree(serverId); } catch { /* the view reports it */ }
       if (seq !== generation) return;
@@ -219,16 +227,13 @@ export async function run() {
     }
   }
 
-  let sidebar = null;
-  try { sidebar = buildSidebar(page.sidebar, ctx, page); }
-  catch { sidebar = null; }
-  setPlaceNav(sidebar);
+  setContextPage(page.sidebar, ctx, page);
 
   let result;
   try {
     result = renderPage(page, ctx);
   } catch (error) {
-    if (seq === generation) paintError(route, error);
+    if (seq === generation) paintError(route, error, ctx, page);
     return;
   }
   if (seq !== generation) return;
@@ -237,7 +242,7 @@ export async function run() {
   try {
     mounted = paint(result, page, route);
   } catch (error) {
-    if (seq === generation) paintError(route, error);
+    if (seq === generation) paintError(route, error, ctx, page);
     return;
   }
   refreshChrome();
@@ -249,7 +254,7 @@ export async function run() {
       await result.onMount();
     } catch (error) {
       if (seq === generation) {
-        const box = failure(error, () => run());
+        const box = fault(error, () => run());
         box.setAttribute('data-fault-origin', 'mount');
         setStage(box);
       }

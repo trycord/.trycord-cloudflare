@@ -7,8 +7,10 @@
 
 import { el } from '../../packages/dom.js';
 import { icon } from '../../packages/icons.js';
-import { path, currentRoute } from '../../packages/nav.js';
+import { brandMark } from '../../packages/brand.js';
+import { path, currentRoute, navigate } from '../../packages/nav.js';
 import { mobilePages } from '../../packages/registry.js';
+import { attachViewSwipe } from '../js/gestures.js';
 import { State } from '../../packages/store.js';
 
 let refs = null;
@@ -24,12 +26,25 @@ export function mountShell() {
   const tabs = el('nav', { class: 'm-tabs', id: 'm-tabs', 'aria-label': 'Primary' });
 
   const root = el('div', { class: 'm-app', id: 'm-shell' },
+    el('a', { class: 'm-skip', href: '#m-view' }, 'Skip to content'),
     el('header', { class: 'm-appbar' }, lead, title, actions),
     banner, view, composer, tabs);
 
   refs = { root, lead, title, actions, banner, view, composer, tabs };
   buildTabs();
   refreshTabs();
+
+  // Horizontal swipe on the view (started at the top of the scroll) hops between
+  // the bottom-tab destinations. Vertical scrolling always wins.
+  attachViewSwipe(view, (delta) => {
+    const pages = mobilePages().filter((p) => p.nav && p.nav.mobile);
+    const here = currentRoute();
+    const idx = pages.findIndex((p) => p.route === here);
+    if (idx === -1) return;
+    const target = pages[(idx + delta + pages.length) % pages.length];
+    navigate(target.route);
+  });
+
   return root;
 }
 
@@ -41,8 +56,10 @@ export function setAppBar(head) {
   const h = head || {};
   refs.lead.replaceChildren();
   if (h.lead === undefined || h.lead === 'brand') {
+    // The monogram's address and box are packages/brand.js's business; the link
+    // is this shell's, because the app bar is the Mobile module's control.
     refs.lead.appendChild(el('a', { class: 'm-brandmark', href: path('/home'), 'aria-label': 'Home' },
-      el('img', { src: '../assets/trycord-assets/brand/trycord-symbol.svg', alt: '', width: 28, height: 28 })));
+      brandMark({ size: 28 })));
   } else if (h.lead === 'back') {
     refs.lead.appendChild(el('button', {
       class: 'm-iconbtn', type: 'button', 'aria-label': 'Back',
@@ -69,6 +86,9 @@ export function setView(node) {
   refs.view.replaceChildren();
   if (node) refs.view.appendChild(node);
   refs.view.scrollTop = 0;
+  // Move the reader's focus to the new screen so it is announced instead of the
+  // tab that was just tapped.
+  refs.view.focus({ preventScroll: true });
 }
 
 export function setComposer(node) {

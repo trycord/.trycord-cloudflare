@@ -181,9 +181,48 @@ a:hover { text-decoration: underline; }
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   height: 100dvh;
-  min-height: 100%;
-  padding-top: env(safe-area-inset-top);
+  min-height: 100svh;
+  padding-top: env(safe-area-inset-top, 0);
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
   background: var(--app-bg);
+}
+
+/* When installed as a webapp (display-mode: standalone) there is no browser
+   chrome: no address bar, no back button, no tabs. The shell is self-contained -
+   its own app bar, tab bar and composer - and safe-area insets cover the status
+   bar and home indicator. Keeping the shell a single full-height grid prevents
+   the address-bar height from being mistaken for layout space. */
+@media (display-mode: standalone) {
+  .m-app {
+    height: 100dvh;
+    min-height: 100svh;
+  }
+}
+
+/* Skip link: off-screen until focused, so keyboard and screen-reader users can
+   jump straight to the view instead of tabbing through the app bar and tab bar
+   on every screen. */
+.m-skip {
+  position: fixed;
+  left: env(safe-area-inset-left, 0);
+  top: env(safe-area-inset-top, 0);
+  z-index: var(--z-scrim, 55);
+  padding: 6px 12px;
+  margin: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: var(--tc-radius-md);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+  transform: translateY(-100%);
+  transition: transform var(--tc-motion-fast);
+}
+.m-skip:focus {
+  transform: translateY(0);
+  outline: 2px solid var(--m-brand-line);
+  outline-offset: 2px;
 }
 /* A conversation hands its footer to the composer: the tab bar would sit under a
    keyboard and is the wrong destination to keep visible while typing. */
@@ -229,8 +268,8 @@ a:hover { text-decoration: underline; }
 .m-iconbtn {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border: 0;
   border-radius: var(--tc-radius-md);
   background: transparent;
@@ -245,7 +284,9 @@ a:hover { text-decoration: underline; }
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   scroll-padding-top: 8px;
-  padding: 10px 12px calc(18px + env(safe-area-inset-bottom));
+  /* One gutter only: .m-app already pads the safe area, and .m-tabs owns the
+     bottom home-indicator inset, so neither safe-area value is repeated here. */
+  padding: 10px 12px 18px;
 }
 
 /* A view that owns a fixed footer (a conversation) drops its own padding and
@@ -257,9 +298,14 @@ a:hover { text-decoration: underline; }
   align-items: stretch;
   justify-content: space-around;
   min-height: var(--m-tabbar-h);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
   background: var(--panel);
   border-top: 1px solid var(--line);
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
 }
 
 .m-tab {
@@ -497,7 +543,7 @@ a:hover { text-decoration: underline; }
 .m-btn--ghost { background: transparent; border-color: transparent; }
 .m-btn--danger { color: var(--m-danger); border-color: var(--m-brand-line); background: transparent; }
 .m-btn--block { display: flex; width: 100%; }
-.m-btn--sm { min-height: 34px; padding: 0 12px; }
+.m-btn--sm { min-height: var(--m-tap); padding: 0 12px; }
 
 .m-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 2px 2px; }
 
@@ -740,7 +786,9 @@ textarea.m-input { min-height: 96px; resize: vertical; }
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0));
+  padding-left: calc(10px + env(safe-area-inset-left, 0));
+  padding-right: calc(10px + env(safe-area-inset-right, 0));
   background: var(--panel);
   border-top: 1px solid var(--line);
 }
@@ -761,7 +809,7 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 .m-composer__send {
   display: grid;
   place-items: center;
-  width: 42px; height: 42px;
+  width: 44px; height: 44px;
   border-radius: var(--tc-radius-md);
   border: 0;
   background: var(--brand-fill);
@@ -876,6 +924,12 @@ textarea.m-input { min-height: 96px; resize: vertical; }
   box-shadow: var(--shadow-2);
 }
 .m-toast--error { border-color: var(--m-brand-line); background: var(--m-brand-soft); }
+
+/* In a conversation the tab bar is hidden, so the toast must not leave a tab-bar
+   shaped gap above the home indicator. */
+.m-app[data-layout="conversation"] .m-toast-root {
+  bottom: calc(12px + env(safe-area-inset-bottom, 0));
+}
 .m-toast--success { border-color: var(--m-success); }
 
 /* ---- auth ----------------------------------------------------------------- */
@@ -892,11 +946,27 @@ textarea.m-input { min-height: 96px; resize: vertical; }
   width: 100%;
 }
 .m-auth__lockup { display: flex; align-items: center; gap: 10px; }
-.m-auth__lockup img { width: 36px; height: 36px; }
+/* The mark keeps its box against the flex row's stretch, exactly as the app bar
+   does, so both sign-in and shell draw the monogram at the same weight. */
+.m-auth__lockup img { display: block; flex: none; width: 36px; height: 36px; }
 .m-auth__name { font-weight: var(--weight-bold); font-size: var(--fs-h2); }
 .m-auth__title { font-size: var(--fs-display); font-weight: var(--weight-bold); letter-spacing: var(--tracking-tight); margin: 0; }
 .m-auth__sub { color: var(--text-2); font-size: var(--fs-sm); margin: -8px 0 0; }
 .m-auth__alt { text-align: center; font-size: var(--fs-sm); color: var(--text-2); }
+
+/* The instance an account would be created on. */
+.m-auth__instance {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text-2);
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  word-break: break-all;
+}
+.m-auth__instance strong { color: var(--text-1); }
 .m-auth__foot { text-align: center; font-size: var(--fs-micro); color: var(--text-3); }
 .m-secret {
   display: block;
@@ -939,6 +1009,7 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 }
 .m-chipbtn {
   flex: 0 0 auto;
+  min-height: var(--m-tap);
   padding: 7px 14px;
   border-radius: var(--tc-radius-pill);
   border: 1px solid var(--line-2);
@@ -956,16 +1027,16 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 
 /* ---- layout primitives ---------------------------------------------------- */
 
-/* The scrolling body of a screen. Fixed chrome above and below it, so the page
-   itself is what moves. */
+/* The scrolling body of a screen. Fixed chrome sits above and below it, so the
+   page itself is what moves. .m-view is the one scrolling region (see the rule
+   above); .m-screen fills it and stacks sections, so nothing here scrolls on its
+   own. Removing the overflow/padding here stops the nested scroll and the double
+   gutter the view and the screen used to stack. */
 .m-screen {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 10px var(--m-gutter) 18px;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  flex: 1 1 auto;
+  height: 100%;
   min-height: 0;
 }
 
@@ -1021,7 +1092,7 @@ textarea.m-input { min-height: 96px; resize: vertical; }
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  min-height: 36px;
+  min-height: var(--m-tap);
   padding: 0 14px;
   border: 0;
   border-radius: var(--tc-radius-pill);
@@ -1106,6 +1177,7 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 /* ---- rows, the parts a page supplies -------------------------------------- */
 
 .m-row__actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.m-row__side { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; justify-content: flex-end; }
 .m-row__time { font-size: var(--fs-micro); color: var(--text-3); white-space: nowrap; }
 .m-row__dot {
   width: 8px; height: 8px;
@@ -1128,8 +1200,8 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 .m-switch {
   position: relative;
   flex: 0 0 auto;
-  width: 46px;
-  height: 28px;
+  width: 48px;
+  height: var(--m-tap);
   padding: 0;
   border: 1px solid var(--line-2);
   border-radius: var(--tc-radius-pill);
@@ -1140,8 +1212,8 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 .m-switch::after {
   content: "";
   position: absolute;
-  top: 2px; left: 2px;
-  width: 22px; height: 22px;
+  top: 10px; left: 10px;
+  width: 24px; height: 24px;
   border-radius: 50%;
   background: var(--text-2);
   transition: transform .16s ease, background .16s ease;
@@ -1213,7 +1285,7 @@ textarea.m-input { min-height: 96px; resize: vertical; }
   border: 1px solid var(--line);
   border-radius: var(--tc-radius-md);
   background: var(--panel-2);
-  font-family: var(--font-mono);
+  font-family: var(--mono);
   font-size: var(--fs-meta);
   color: var(--text-1);
   user-select: all;
@@ -1344,7 +1416,6 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 
 /* ---- the sign-in surfaces ------------------------------------------------- */
 
-.m-auth__brand { display: grid; place-items: center; gap: 10px; padding: 24px 0 8px; }
 .m-auth__card {
   display: flex;
   flex-direction: column;
@@ -1356,8 +1427,18 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 }
 .m-auth__form { display: flex; flex-direction: column; gap: 14px; }
 
-/* The monogram, at the size the phone header uses. */
-.m-brandmark { display: block; border-radius: var(--tc-radius-sm); }
+/* The monogram, at the size the phone header uses.
+   The box is named here, on the wrapper, and nowhere else. The symbol ships with
+   width and height attributes of 512 of its own, and the image inside this
+   wrapper is sized to 100% of it - so a wrapper with no box of its own hands the
+   intrinsic 512 back, which is the app bar grown to fill half the screen. */
+.m-brandmark {
+  display: block;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: var(--tc-radius-sm);
+}
 .m-brandmark img { display: block; width: 100%; height: 100%; object-fit: contain; }
 
 /* ---- profile -------------------------------------------------------------- */
@@ -1371,7 +1452,7 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 .m-profile-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .m-profile-name { font-size: var(--fs-h2); font-weight: var(--weight-strong); color: var(--text-1); }
 .m-profile-handle { font-size: var(--fs-sm); color: var(--text-2); }
-.m-profile-id { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text-3); }
+.m-profile-id { font-family: var(--mono); font-size: var(--fs-micro); color: var(--text-3); }
 
 .m-role-dot {
   width: 10px; height: 10px;
@@ -1436,3 +1517,11 @@ textarea.m-input { min-height: 96px; resize: vertical; }
     transition-duration: .01ms !important;
   }
 }
+
+/* -- the mail console on a phone ------------------------------------------
+ * The three delivery modes as honest radio rows: the chosen one marked, the
+ * status said out loud, and a test send only where a transport could carry it. */
+
+.m-row[role="radio"] { cursor: pointer; }
+.m-row.is-current { background: var(--m-selected); }
+.m-row.is-current .m-row__title { color: var(--m-brand); }

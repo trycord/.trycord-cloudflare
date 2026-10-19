@@ -63,14 +63,21 @@ function fetchSource() {
     process.stdout.write(`updating source to ${REF}\n`);
     if (isLocal) {
       git('-C', SRC, 'fetch', '--quiet', 'origin');
-    } else if (looksLikeSha) {
-      git('-C', SRC, 'fetch', '--quiet', '--depth', '1', 'origin', REF);
     } else {
       git('-C', SRC, 'fetch', '--quiet', '--depth', '1', 'origin', REF);
     }
   }
-  if (looksLikeSha) git('-C', SRC, 'checkout', '--quiet', 'FETCH_HEAD');
-  git('-C', SRC, 'checkout', '--quiet', '--force', REF);
+  // What was just fetched, not the branch that was there before.
+  //
+  // Checking out the local branch after a fetch keeps the old commit: the
+  // branch only moves when it is merged, so a build that fetched the newest
+  // source and then checked out 'main' deployed the previous one. FETCH_HEAD is
+  // what was actually fetched.
+  if (isLocal) {
+    git('-C', SRC, 'checkout', '--quiet', '--force', 'origin/' + REF);
+  } else {
+    git('-C', SRC, 'checkout', '--quiet', '--force', 'FETCH_HEAD');
+  }
   const head = git('-C', SRC, 'rev-parse', 'HEAD');
   process.stdout.write(`source at ${head}\n`);
   return head;
@@ -149,6 +156,12 @@ function build() {
   writeBaseHref(path.join(app, 'index.html'), APP_MOUNT);
 
   writeBackendConfig(path.join(app, 'backend.json'));
+  // The public site reads the instance's API too - the demo and the community
+  // directory - and on this deployment the site and the API are different
+  // origins. The address the app was given is the address the site is given,
+  // written here rather than left to whatever the product source happened to
+  // carry, so the two cannot disagree.
+  writeSiteBackendConfig(path.join(DIST, 'backend.json'));
 }
 
 
@@ -228,6 +241,28 @@ function writeBackendConfig(dest) {
   const out = Object.assign({}, cfg, { fallbackUrls: fallbacks });
   fs.writeFileSync(dest, JSON.stringify(out, null, 2) + '\n');
   process.stdout.write(`  app/backend.json: ${out.backendUrl || '(unset)'} + ${fallbacks.length} fallback(s)\n`);
+}
+
+// The public site's own backend.json.
+//
+// The site's pages read the instance's API from here, so a site deployed
+// somewhere other than the instance knows which instance to ask. It carries
+// the address only: the public pages do not fail over, so a backup would only
+// confuse them.
+function writeSiteBackendConfig(dest) {
+  let cfg = {};
+  const existing = path.join(clientDir(), 'backend.json');
+  if (fs.existsSync(existing)) {
+    try { cfg = JSON.parse(fs.readFileSync(existing, 'utf8')); } catch (e) {
+      throw new Error('trycord-client/backend.json is not valid JSON: ' + e.message);
+    }
+  }
+  const backendUrl = String(cfg.backendUrl || '').trim();
+  if (!/^https?:\/\//i.test(backendUrl)) {
+    throw new Error('the deployment has no API address to give the public site');
+  }
+  fs.writeFileSync(dest, JSON.stringify({ backendUrl }, null, 2) + '\n');
+  process.stdout.write('  backend.json: ' + backendUrl + '\n');
 }
 
 const head = fetchSource();
