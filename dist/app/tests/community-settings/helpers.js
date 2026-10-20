@@ -8,6 +8,13 @@ import { installDomStub } from '../helpers/dom-stub.js';
 
 installDomStub();
 
+// The phone's sheets open on the next frame, so the platform they draw in
+// has to have a frame to draw on.
+if (typeof globalThis.requestAnimationFrame !== 'function') {
+  globalThis.requestAnimationFrame = (run) => setTimeout(run, 0);
+  globalThis.cancelAnimationFrame = (handle) => clearTimeout(handle);
+}
+
 // A fetch that answers from a table of routes, matched by the beginning of
 // the address.
 //
@@ -168,7 +175,16 @@ export function communityContext() {
   };
 }
 
+// The overlays that are open.
+//
+// The document is cleared first, so a dialog left open by an earlier check
+// is not mistaken for one this check raised.
+export function openOverlays() {
+  document.body.replaceChildren();
+  return [];
+}
+
 export default {
   installFetch, communityRoutes, callsTo, find, byText, buttonByText, buttons, inputs, type,
-  communityContext,
+  communityContext, openOverlays,
 };

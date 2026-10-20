@@ -46,7 +46,6 @@ const readScopes = () => request('GET', V1 + '/scopes');
 
 const readApplications = (serverId) => request('GET', V1 + '/communities/' + pathId(serverId) + '/applications');
 const createApplication = (serverId, body) => request('POST', V1 + '/communities/' + pathId(serverId) + '/applications', { body });
-const readApplication = (serverId, applicationId) => request('GET', V1 + '/communities/' + pathId(serverId) + '/applications/' + pathId(applicationId));
 const rotateApplicationToken = (serverId, applicationId) => request('POST', V1 + '/communities/' + pathId(serverId) + '/applications/' + pathId(applicationId) + '/rotate-token');
 const revokeApplication = (serverId, applicationId, body) => request('POST', V1 + '/communities/' + pathId(serverId) + '/applications/' + pathId(applicationId) + '/revoke', { body });
 const applicationHealth = (serverId, applicationId) => request('GET', V1 + '/communities/' + pathId(serverId) + '/applications/' + pathId(applicationId) + '/health');
@@ -517,6 +516,38 @@ function openCommands(serverId, application, onDone) {
   return dialog;
 }
 
+// What an application is doing, and whether it is working.
+function openApplicationHealth(serverId, application) {
+  const body = el('div', { class: 'fold' });
+  const dialog = openDialog({
+    title: application.name + ' at work',
+    sub: 'Whether the application is working, and what it has asked for.',
+    body,
+  });
+  body.replaceChildren(hold('Reading the health'));
+  applicationHealth(serverId, application.id).then((health) => {
+    const answer = health || {};
+    body.replaceChildren(el('div', { class: 'fold fold--tight' },
+      facts([
+        { value: answer.state || 'unknown', label: 'Its state' },
+        { value: answer.rateLimitPerMinute || '—', label: 'Requests a minute' },
+        { value: answer.lastUsedAt ? formatDateTime(answer.lastUsedAt) : 'never', label: 'Last used' },
+      ]),
+      answer.lastFailure
+        ? memo({
+          tone: 'warning',
+          title: 'Its last failure',
+          text: (answer.lastFailure.route || 'a route') + ' · ' + (answer.lastFailure.errors || 0) + ' errors',
+        })
+        : null,
+      el('p', { class: 'form-note' },
+        'The scopes it carries: ' + ((answer.scopes || []).join(', ') || 'none'))));
+  }).catch((error) => {
+    body.replaceChildren(fault(error, null));
+  });
+  return dialog;
+}
+
 // Making an application: its name and the scopes its credential carries.
 function openCreateApplication(serverId, onDone) {
   const body = el('div', { class: 'fold' });
@@ -641,6 +672,11 @@ function applicationsSection() {
       side: el('div', { class: 'cardrow-side' },
         el('button', {
           class: 'btn btn--ghost btn--sm', type: 'button',
+          'aria-label': 'See whether ' + application.name + ' is working',
+          onClick: () => openApplicationHealth(serverId, application),
+        }, 'Its work'),
+        el('button', {
+          class: 'btn btn--ghost btn--sm', type: 'button',
           'aria-label': 'See the commands of ' + application.name,
           onClick: () => openCommands(serverId, application, paint),
         }, 'Commands'),
@@ -759,6 +795,13 @@ export function renderDeveloper(ctx) {
   let current = null;
   let live = null;
 
+  // The section may be named in the address, so that a particular one can be
+  // linked to and a reader can come back to it.
+  function wantedSection() {
+    const asked = ctx && ctx.query ? String(ctx.query.get('section') || '') : '';
+    return SECTIONS.some((section) => section.id === asked) ? asked : SECTIONS[0].id;
+  }
+
   function paintTabs() {
     tabs.replaceChildren(...SECTIONS.map((section) => el('button', {
       class: 'segmented-item',
@@ -791,7 +834,7 @@ export function renderDeveloper(ctx) {
 
   return {
     node,
-    onMount: () => show(SECTIONS[0].id),
+    onMount: () => show(wantedSection()),
     cleanup() {
       if (live && live.cleanup) live.cleanup();
       live = null;

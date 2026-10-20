@@ -41,7 +41,6 @@ const removeExtension = (id) => request('DELETE', ROOT + '/' + pathId(id), { bod
 const grantCapability = (id, capability) => request('POST', ROOT + '/' + pathId(id) + '/grants', { body: { capability, reason: null } });
 const revokeCapability = (id, capability) => request('DELETE', ROOT + '/' + pathId(id) + '/grants/' + pathId(capability), { body: { reason: null } });
 const readWorkflows = () => request('GET', ROOT + '/workflows');
-const readWorkflow = (id) => request('GET', ROOT + '/workflows/' + pathId(id));
 const readWorkflowRuns = (id) => request('GET', ROOT + '/workflows/' + pathId(id) + '/runs');
 const readRun = (id) => request('GET', ROOT + '/workflows/runs/' + pathId(id));
 const runWorkflow = (id) => request('POST', ROOT + '/workflows/' + pathId(id) + '/run', { body: {} });
@@ -298,10 +297,10 @@ function installedSheet(extension, onDone) {
   const grant = el('div', { class: 'm-stack' });
   if (askable.length) {
     const picker = select({
-      label: 'Grant another capability',
       choices: askable.map((capability) => ({ value: capability, label: capabilityLabel(capability) })),
     });
-    grant.appendChild(picker);
+    picker.value = askable[0];
+    grant.appendChild(field({ label: 'Grant another capability', control: picker }));
     grant.appendChild(primaryButton('Grant it', async () => {
       const capability = picker.value;
       if (!capability) return;
@@ -901,9 +900,13 @@ const SECTIONS = [
 export function renderExtensions(ctx) {
   const host = el('div', { class: 'm-stack' });
   const strip = el('div', { class: 'm-seg m-seg--scroll', role: 'tablist', 'aria-label': 'Extension console sections' });
-  let current = 'registry';
 
   const offered = () => SECTIONS.filter((section) => !section.operator || isOperator());
+
+  // The section may be named in the address, so that a particular one can be
+  // linked to and a reader can come back to it.
+  const asked = ctx && ctx.query ? String(ctx.query.get('section') || '') : '';
+  let current = offered().some((section) => section.id === asked) ? asked : 'registry';
 
   function paintStrip() {
     clear(strip);
