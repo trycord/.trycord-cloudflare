@@ -71,6 +71,8 @@ export function adminPeople() {
           'aria-label': 'Actions for the account ' + (u.username || ''),
           onClick: (event) => userActions(event, u, () => paintRows(input.value.trim())),
         }, icon('more', { size: 15 })),
+        // The same actions, raised by a right-click on the row itself.
+        menu: () => userActionItems(u, () => paintRows(input.value.trim())),
       })) : [blank({
         glyph: 'user', title: 'No account by that name',
         text: 'The search reads names and handles; try fewer letters.',
@@ -103,8 +105,8 @@ export function adminPeople() {
   };
 }
 
-function userActions(event, user, refresh) {
-  const items = [
+function userActionItems(user, refresh) {
+  return [
     { header: user.displayName || user.username || 'An account' },
     {
       label: 'Suspend for one day', icon: 'clock',
@@ -137,19 +139,54 @@ function userActions(event, user, refresh) {
       },
     },
   ];
-  openMenu({ anchor: event.currentTarget, items });
 }
 
+function userActions(event, user, refresh) {
+  openMenu({ anchor: event.currentTarget, items: userActionItems(user, refresh) });
+}
+
+// Apply an enforcement action to an account.
+//
+// The body is the **server's** contract, not a shorthand of our own. It used
+// to send `{ kind, duration, reason }`, and the server reads `actionType`,
+// `reason`, `expiresInHours` and `confirm` - so every one of these actions
+// was refused with "invalid action type for user target" and the menu items
+// did nothing at all.
+//
+// The mapping is here, in one place, so that a change to the server's
+// vocabulary is a change to one table rather than to three call sites.
+const ENFORCEMENT = {
+  // A warning: a note on the account, and nothing more.
+  warn: { actionType: 'WARNING' },
+  // A suspension for a while. The hours are how long it lasts; without them
+  // the suspension is until it is lifted.
+  suspend: { actionType: 'SUSPENSION' },
+  // An account ban. The server asks for an explicit confirmation, because a
+  // ban is the one action that cannot be taken back by lifting it.
+  ban: { actionType: 'ACCOUNT_BAN', confirm: true },
+};
+
 async function enforceWith(user, refresh, plan) {
+  const mapping = ENFORCEMENT[plan.kind];
+  if (!mapping) {
+    errorToast({ message: 'That enforcement is not one this console can apply.' });
+    return;
+  }
+  const body = Object.assign({}, mapping, { reason: plan.reason });
+  if (plan.duration === '1d') body.expiresInHours = 24;
+
   const yes = await confirmDialog({
-    title: 'Suspend or ban ' + (user.username || 'this account') + '?',
-    body: 'The person loses access until the enforcement is lifted on purpose.',
-    confirmLabel: 'Apply enforcement',
+    title: (plan.kind === 'ban' ? 'Ban ' : 'Suspend ') + (user.username || 'this account') + '?',
+    body: plan.kind === 'ban'
+      ? 'The person loses access to everything on this instance, and the action '
+        + 'has to be undone on purpose. The reason is recorded.'
+      : 'The person loses access until the enforcement is lifted on purpose.',
+    confirmLabel: plan.kind === 'ban' ? 'Ban the account' : 'Apply enforcement',
     danger: true,
   });
   if (!yes) return;
   try {
-    await Api.adminEnforceUser(user.id, plan);
+    await Api.adminEnforceUser(user.id, body);
     toast('Enforcement applied');
     refresh();
   } catch (e) { errorToast(e); }
@@ -215,14 +252,11 @@ export function adminReports() {
         side: el('button', {
           class: 'btn btn--ghost btn--sm', type: 'button',
           'aria-label': 'Update the report',
-          onClick: async () => {
-            try {
-              await Api.adminUpdateReport(r.id, { status: 'resolved' });
-              toast('Report updated');
-              paint();
-            } catch (e) { errorToast(e); }
-          },
+          onClick: () => resolveReport(r, paint),
         }, 'Resolve'),
+        menu: () => [
+          { label: 'Resolve the report', icon: 'check', onSelect: () => resolveReport(r, paint) },
+        ],
       })) : [blank({
         glyph: 'flag', title: 'No reports',
         text: 'Reports raised by members appear here.',
@@ -246,6 +280,35 @@ export function adminReports() {
   };
 }
 
+// The actions on one report, one appeal and one data request. The row's
+// buttons and its context menu offer the same things, so they are written
+// once.
+async function resolveReport(report, refresh) {
+  try {
+    await Api.adminUpdateReport(report.id, { status: 'resolved' });
+    toast('Report updated');
+    refresh();
+  } catch (e) { errorToast(e); }
+}
+
+async function decideAppeal(appeal, decision, refresh) {
+  try {
+    await Api.adminDecideAppeal(appeal.id, decision, decision === 'approve'
+      ? 'Approved by an administrator' : 'Denied by an administrator');
+    toast(decision === 'approve' ? 'Approved' : 'Denied');
+    refresh();
+  } catch (e) { errorToast(e); }
+}
+
+async function reviewRequest(request, decision, refresh) {
+  try {
+    await Api.adminReviewGdprRequest(request.id, decision, decision === 'approve'
+      ? 'Approved by an administrator' : 'Denied by an administrator');
+    toast(decision === 'approve' ? 'Approved' : 'Denied');
+    refresh();
+  } catch (e) { errorToast(e); }
+}
+
 // -- appeals -----------------------------------------------------------------
 
 export function adminAppeals() {
@@ -263,24 +326,16 @@ export function adminAppeals() {
         side: el('span', { class: 'rowtools' },
           el('button', {
             class: 'btn btn--primary btn--sm', type: 'button',
-            onClick: async () => {
-              try {
-                await Api.adminDecideAppeal(a.id, 'approve', 'Approved by an administrator');
-                toast('Approved');
-                paint();
-              } catch (e) { errorToast(e); }
-            },
+            onClick: () => decideAppeal(a, 'approve', paint),
           }, 'Approve'),
           el('button', {
             class: 'btn btn--ghost btn--sm', type: 'button',
-            onClick: async () => {
-              try {
-                await Api.adminDecideAppeal(a.id, 'deny', 'Denied by an administrator');
-                toast('Denied');
-                paint();
-              } catch (e) { errorToast(e); }
-            },
+            onClick: () => decideAppeal(a, 'deny', paint),
           }, 'Deny')),
+        menu: () => [
+          { label: 'Approve the appeal', icon: 'check', onSelect: () => decideAppeal(a, 'approve', paint) },
+          { label: 'Deny the appeal', icon: 'x', danger: true, onSelect: () => decideAppeal(a, 'deny', paint) },
+        ],
       })) : [blank({
         glyph: 'mail', title: 'No appeals',
         text: 'Requests to reconsider an enforcement land here.',
@@ -356,13 +411,7 @@ export function adminGdpr() {
         side: el('span', { class: 'rowtools' },
           el('button', {
             class: 'btn btn--ghost btn--sm', type: 'button',
-            onClick: async () => {
-              try {
-                await Api.adminReviewGdprRequest(r.id, 'approve', 'Approved by an administrator');
-                toast('Approved');
-                paint();
-              } catch (e) { errorToast(e); }
-            },
+            onClick: () => reviewRequest(r, 'approve', paint),
           }, 'Approve'),
           el('button', {
             class: 'btn btn--ghost btn--sm', type: 'button',
@@ -374,6 +423,19 @@ export function adminGdpr() {
               } catch (e) { errorToast(e); }
             },
           }, 'Process')),
+        menu: () => [
+          { label: 'Approve the request', icon: 'check', onSelect: () => reviewRequest(r, 'approve', paint) },
+          {
+            label: 'Process the request', icon: 'zap', danger: true,
+            onSelect: async () => {
+              try {
+                await Api.adminProcessGdprRequest(r.id);
+                toast('Processed');
+                paint();
+              } catch (e) { errorToast(e); }
+            },
+          },
+        ],
       })) : [blank({
         glyph: 'lock', title: 'No data requests',
         text: 'Erasure and access requests land here.',

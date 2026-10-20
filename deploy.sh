@@ -29,7 +29,7 @@ for arg in "$@"; do
   esac
 done
 
-REF="${TRYCORD_REF:-main}"
+REF="${TRYCORD_REF:-release/3.0.0}"
 export TRYCORD_REF="$REF"
 
 echo "==> building from $REF"

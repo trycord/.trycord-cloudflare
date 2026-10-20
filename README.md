@@ -29,8 +29,8 @@ Environment:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `TRYCORD_REPO` | `https://github.com/trycord/.trycord.git` | Product source. A local path also works. |
-| `TRYCORD_REF` | `main` | Branch, tag or commit to build. Pin a SHA for a reproducible deploy. |
+| `TRYCORD_REPO` | `https://github.com/trycord/.trycord.git` | Product source. A local path also works. The build refuses to fetch this deployment's own repository. |
+| `TRYCORD_REF` | `release/3.0.0` | Branch, tag or commit to build. Pin a SHA for a reproducible deploy. |
 
 ```bash
 TRYCORD_REF=<sha> node build.js

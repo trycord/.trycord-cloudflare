@@ -12,9 +12,12 @@ import { TrycordConfig } from '../../packages/config.js';
 import {
   State, on as onStore, loadInstance, loadLegal, loadSession, logout,
   refreshServers, refreshDms, refreshFriends, refreshNotifications,
+  markConversationRead,
 } from '../../packages/store.js';
 import { installLinkHandler, installPopStateHandler, BASE, setBase, mountFromModuleUrl } from '../../packages/nav.js';
+import { loadLocale } from '../../packages/locale.js';
 import realtime, { on as onRealtime, EVENTS, SESSION_EVENTS } from '../../packages/realtime.js';
+import * as encrypted from './encrypted.js';
 import { bind } from '../../packages/registry.js';
 import { readOverride, siblingMount } from '../../packages/chooser.js';
 import { RENDERERS } from './views/index.js';
@@ -73,6 +76,15 @@ function wireChrome() {
   onRealtime(SESSION_EVENTS.SESSION_REVOKED, () => {
     logout().catch(() => { /* the token is already gone */ });
   });
+  // A conversation read elsewhere. The event says who read it: when that is
+  // this account, the badge here is stale and is cleared; when it is somebody
+  // else, the unread count is still this account's own.
+  onRealtime(EVENTS.DM_READ, (event) => {
+    const reader = event.userId || event.user_id;
+    const me = State.user && State.user.id;
+    if (reader && me && String(reader) !== String(me)) return;
+    markConversationRead(event.conversationId || event.conversation_id || event.id);
+  });
 }
 
 function wireSignOut() {
@@ -80,6 +92,11 @@ function wireSignOut() {
   // This only keeps the document and the gateway consistent with the new state.
   onStore('signed-out', () => {
     realtime.disconnect();
+    // The encryption client is dropped with the session. The device's keys stay
+    // on the device - a device is an identity and does not change because
+    // somebody signed out - but the open client belongs to the account that
+    // is no longer here.
+    encrypted.reset();
     setSession('out');
   });
   onStore('user', () => { setSession('in'); });
@@ -101,12 +118,20 @@ async function boot() {
 
   try {
     await loadSession();
+    // The device is registered as soon as the reader is signed in: a device
+    // that has never registered cannot hold a conversation key.
+    encrypted.ready().catch(() => { /* the encryption page reports it */ });
   } catch {
     // A network failure is not a signed-out reader, but sign-in is the only honest
     // screen to show until the instance answers again.
     State.user = null;
   }
   setSession(State.user ? 'in' : 'out');
+
+  // The locale the instance answers in, and the strings it answers with. A
+  // reader who is signed in gets their own preference here. An instance that
+  // cannot answer leaves the interface in its built-in language.
+  try { await loadLocale(); } catch { /* the built-in language stands */ }
 
   if (State.user) {
     await Promise.allSettled([refreshServers(), refreshDms(), refreshFriends(), refreshNotifications()]);

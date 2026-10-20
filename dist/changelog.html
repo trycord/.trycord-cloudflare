@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-title" content="Trycord">
   <link rel="apple-touch-icon" href="/assets/app-icon.svg">
   <title>Changelog: what changed in Trycord</title>
-  <meta name="description" content="A record of what changed in Trycord, taken from the repository's history. The current release is 1.6.1, with development continuing on main.">
+  <meta name="description" content="A record of what changed in Trycord, taken from the repository's history. The current release is 3.6.6, with development continuing on main.">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/css/design-tokens.css">
   <link rel="stylesheet" href="/css/site.css">
@@ -52,7 +52,7 @@
             </div>
             <div class="nav-menu-foot">
               <p>Private, self-hostable community messaging.</p>
-              <a class="text-link" href="/demo">Try the live demo</a>
+              <a class="text-link" href="/demo">Try the demo</a>
             </div>
           </div>
         </div>
@@ -64,7 +64,8 @@
           </button>
           <div class="nav-menu">
             <a href="/communities"><strong>Communities</strong><span>Browse public communities.</span></a>
-            <a href="/demo"><strong>Live demo</strong><span>Try Trycord without an account.</span></a>
+            <a href="/instances"><strong>Instances</strong><span>Find an instance to join.</span></a>
+            <a href="/demo"><strong>Demo</strong><span>Try Trycord without an account.</span></a>
           </div>
         </div>
 
@@ -101,7 +102,7 @@
           <svg class="icon icon-sun" viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></svg>
           <svg class="icon icon-moon" viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></g></svg>
         </button>
-        <a class="btn btn-primary btn-sm" href="/app/">Open the app</a>
+        <a class="btn btn-primary btn-sm" href="/app/" data-app-link>Open the app</a>
       </div>
     </div>
   </header>
@@ -113,13 +114,53 @@
         <h1>What changed, and when</h1>
         <p class="lede">
           This is curated from the repository's own history. Releases are listed
-          newest first. The current release is <strong>1.6.4</strong>, and the
+          newest first. The current release is <strong>3.6.6</strong>, and the
           entry above it is work on <code>main</code> that has not been cut into
           a release yet.
         </p>
       </div>
 
       <ol class="timeline">
+        <li>
+          <p class="when">3.6.6 &middot; 2026-10-20</p>
+          <h2>Six faults, found by running the suites</h2>
+          <ul>
+            <li><strong>Fixed</strong> — the enforcement actions on an account were refused, so the menu items did nothing</li>
+            <li><strong>Fixed</strong> — every installed extension was broken, because the extension API version was the application version</li>
+            <li><strong>Fixed</strong> — the voice console could not save anything, because it wrote through the page that refuses the voice settings</li>
+            <li><strong>Fixed</strong> — the third-party SFU token belonged to no console, so it could not be set</li>
+            <li><strong>Fixed</strong> — one setting was declared twice, so it was rendered twice and the second copy won</li>
+            <li><strong>Fixed</strong> — the accessibility audit read a comment as code and reported a named button as unnamed</li>
+          </ul>
+        </li>
+        <li>
+          <p class="when">3.6.0 &middot; 20 October 2026</p>
+          <h2>The voice stack that answers, the bots that listen, and the settings that have one owner</h2>
+          <ul>
+            <li><strong>Fixed</strong> — the context menu closed when it was scrolled, and a closed menu left a handler behind that closed live menus.</li>
+            <li><strong>Fixed</strong> — the poll editor threw on every click, so the whole poll surface was unreachable.</li>
+            <li><strong>Fixed</strong> — removing your own picture threw, because the account settings called a function that was not in scope.</li>
+            <li><strong>Fixed</strong> — the phone threw on a poll that had a voter, and on the poll editor.</li>
+            <li><strong>Fixed</strong> — the instance answered every STUN request with nothing, because the encoder used a constant that was never defined and the handler threw the error away.</li>
+            <li><strong>Fixed</strong> — the document editor refused a heading written with a single hash, and accused the writer of using two or three.</li>
+            <li><strong>Fixed</strong> — the place column disappeared at 125% zoom, because the width it turned at was a laptop width and not a phone width.</li>
+            <li><strong>Fixed</strong> — the registration form had no place to accept the documents, and the button said nothing about why it was closed.</li>
+            <li><strong>Fixed</strong> — the voice settings could be changed in two places at once, and the two could disagree.</li>
+            <li><strong>Fixed</strong> — the instance directory did not exist, and the register page linked to it.</li>
+            <li><strong>Fixed</strong> — the community settings mount swallowed the route a reader uses to join a community.</li>
+            <li><strong>Added</strong> — the voice subsystem is a process of its own, with its own health and its own diagnostics.</li>
+            <li><strong>Added</strong> — an application can listen: the gateway hands a bot the same events a webhook is handed.</li>
+            <li><strong>Added</strong> — community onboarding: the welcome, the rules, and the questions, and what an answer does.</li>
+            <li><strong>Added</strong> — the instance directory is a page of the public site.</li>
+            <li><strong>Added</strong> — the workspace uses the width it is given, and the card head stops clipping its button.</li>
+            <li><strong>Added</strong> — the client and the backend are checked for the names they use and do not have.</li>
+            <li>The sign-in and registration pages now stand alone. The shell that was meant to hide was not hiding: a component that sets its own display beats the browser's rule for the hidden attribute, so the empty shell kept the viewport and pushed the page below it.</li>
+            <li>The demo and the community directory reach the instance again. The public site and the API are different origins in a real deployment, and the pages were asking for a relative path that the site cannot answer; they now resolve the address the same way the application does.</li>
+            <li>The deployment build was shipping an old tree: it fetched the newest source and then checked out the branch it already had. It now deploys what it fetched.</li>
+            <li>Instance discovery, per-instance sessions, an in-house search index, backups with a restore path, housekeeping, and one honest report per subsystem all land in this release.</li>
+            <li>The version is reported by the server, the API and the application, and all of them say the same thing.</li>
+          </ul>
+        </li>
         <li>
           <p class="when">2.5.0 &middot; 19 October 2026</p>
           <h2>One backend, a chosen instance, and a machine that is not fighting itself</h2>
@@ -228,7 +269,7 @@
           <span class="brand-word">Trycord</span>
         </a>
         <p>Private, self-hostable community messaging. One client, browser and desktop.</p>
-        <a class="btn btn-sm" href="/app/">Open the app</a>
+        <a class="btn btn-sm" href="/app/" data-app-link>Open the app</a>
       </div>
       <div class="footer-col">
         <h2 class="footer-heading">Product</h2>
@@ -241,7 +282,8 @@
       <div class="footer-col">
         <h2 class="footer-heading">Explore</h2>
         <a href="/communities">Communities</a>
-        <a href="/demo">Live demo</a>
+        <a href="/instances">Instances</a>
+        <a href="/demo">Demo</a>
         <a href="/status">Status</a>
       </div>
       <div class="footer-col">
@@ -265,6 +307,7 @@
     </div>
   </footer>
 
+  <script src="/js/public-api.js"></script>
   <script src="/js/site.js"></script>
 </body>
 </html>

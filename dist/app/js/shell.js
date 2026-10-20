@@ -16,16 +16,19 @@
 import { el, clear } from '../packages/dom.js';
 import { icon } from '../packages/icons.js';
 import { avatar, countBadge, serverMark } from './ui/primitives.js';
-import { State, nameOf } from '../packages/store.js';
+import { State, nameOf, on as onStore } from '../packages/store.js';
 import { path, currentRoute, navigate, BASE } from '../packages/nav.js';
 import { openMenu, attachContextMenu, isOverlayOpen, isMenuOpen, closeTopOverlay } from './ui/overlays.js';
 import { buildContext, serverMenuItems } from './shell/context.js';
-import { buildFrame, attachColumnResize, brandMark } from './shell/frame.js';
+import {
+  buildFrame, attachColumnResize, brandMark,
+  narrowWindow, NARROW_WIDTH as FRAME_NARROW_WIDTH,
+} from './shell/frame.js';
 import { createInspector } from './shell/inspector.js';
 import { openPalette, shortcutLabel } from './shell/palette.js';
 import {
-  applyDensity, applyLayoutWidths, rememberContextWidth,
-  CONTEXT_MIN, CONTEXT_MAX,
+  applyDensity, applyLayoutWidths, applyRegions, rememberContextWidth, rememberStageWidth,
+  onPrefsChange, regionEnabled, CONTEXT_MIN, CONTEXT_MAX, STAGE_MIN, STAGE_MAX,
 } from './prefs.js';
 import { setOverride, viewportWantsMobile, siblingMount } from '../packages/chooser.js';
 
@@ -46,6 +49,7 @@ export function mountShell() {
 
   applyDensity();
   applyLayoutWidths(frame.root);
+  applyRegions(frame.root);
 
   refs.frame.kbd.textContent = shortcutLabel();
   refs.frame.omnibox.addEventListener('click', () => openPalette());
@@ -58,6 +62,22 @@ export function mountShell() {
     sign: 1,
     remember: rememberContextWidth,
     fallback: 276,
+  });
+
+  attachColumnResize(frame.stageGrip, {
+    root: frame.root,
+    variable: '--stage-w',
+    min: STAGE_MIN,
+    max: STAGE_MAX,
+    sign: -1,
+    remember: rememberStageWidth,
+    fallback: 1180,
+  });
+
+  // The panel control belongs to the chrome, so it is the chrome that answers
+  // for it: it is offered only when the page on screen has a panel to show.
+  frame.inspectorToggle.addEventListener('click', () => {
+    if (refs.inspector) refs.inspector.toggle();
   });
 
   frame.scrim.addEventListener('click', () => {
@@ -83,13 +103,56 @@ export function mountShell() {
 
   syncNavMode();
   window.addEventListener('resize', syncNavMode);
+
+  // The arrangement is a reader's choice made in the settings screen, so the
+  // shell follows it the moment it changes rather than at the next reload.
+  onPrefsChange(() => {
+    applyLayoutWidths(frame.root);
+    applyRegions(frame.root);
+    // A panel that is no longer part of the arrangement is taken away, but the
+    // reader's taste is remembered: it comes back when they put it back.
+    if (refs.inspector && refs.inspector.isOpen() && !regionEnabled('inspector')) {
+      refs.inspector.dismiss();
+    }
+  });
+
+  // The column speaks for the community's tree, so a tree that changes - a
+  // channel made, moved or reordered - repaints the column where the reader
+  // is looking at it.
+  onStore('tree', () => paintContext());
+  onStore('mutes', () => paintContext());
+  onStore('presence', () => paintContext());
+
   return frame.root;
 }
 
 // The column is a column on a desk and an overlay on a narrow window. The mode
 // is a viewport fact, and the expanded/collapsed choice survives it.
+// The width below which the place column draws over the stage.
+//
+// It is a layout constraint, not a device label: the communities rail, the
+// column and a stage a conversation can be read in need about 860 pixels
+// between them. Above that the column is a column; below it, it is a panel
+// that opens over the stage.
+//
+// It was 1080, which is a laptop screen and not a phone screen - and a
+// browser at 125% or 150% zoom turns an ordinary 1366-pixel laptop into
+// something narrower than that, so the sidebar disappeared for a reader who
+// had done nothing except make the text bigger.
+//
+// The stylesheet has the same number, in the media query that hides the
+// column. They are checked against each other, because a threshold in one
+// place and not the other is a sidebar that is visible in one half of the
+// application and not the other.
+// The width below which the place column is a panel over the stage rather
+// than a column beside it. It is one number, and the frame owns it, because
+// the frame's button and the stylesheet's media query both depend on it.
+export const NARROW_WIDTH = FRAME_NARROW_WIDTH;
+
 function narrow() {
-  try { return window.matchMedia('(max-width: 1080px)').matches; } catch { return false; }
+  // The same question the stylesheet asks, in one place, so the button and
+  // the media query cannot disagree about it.
+  return narrowWindow();
 }
 
 function syncNavMode() {
@@ -194,7 +257,13 @@ function append(host, content) {
 // ---- the inspector ---------------------------------------------------------
 
 export function setInspector(spec) {
-  if (refs.inspector) refs.inspector.setSpec(spec || null);
+  if (!refs.inspector) return;
+  refs.inspector.setSpec(spec || null);
+  const frame = refs.frame;
+  if (!frame) return;
+  // The control is offered only when there is a panel behind it.
+  frame.inspectorToggle.hidden = !spec;
+  frame.inspectorToggle.setAttribute('aria-expanded', String(!!(spec && refs.inspector.isOpen())));
 }
 
 export function toggleInspector() {

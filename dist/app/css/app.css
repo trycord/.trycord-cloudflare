@@ -59,10 +59,16 @@
   --rail-w: 68px;
   --context-w: 276px;
   --inspector-w: 336px;
+  --stage-w: 1180px;
   --cmdbar-h: 52px;
   --head-h: 54px;
   --composer-max: 300px;
   --content-max: 1040px;
+  /* A working surface is not a reading column. A studio - the workspace, the
+     settings console, anything with two panes side by side - uses the width
+     it is given, up to a point: a workspace squeezed into the width of an
+     article is a workspace nobody can work in. */
+  --workspace-max: 1760px;
 
   /* The readable floor. */
   --text-xs: 0.75rem;
@@ -130,7 +136,8 @@
 
 /* Density. The attribute lives on <html> and is written by js/prefs.js; the
  * default block is cozy, and the two other arrangements change measurements
- * rather than type, so a row is still a row. */
+ * rather than type, so a row is still a row. The rail's width is part of the
+ * arrangement: a dense workspace gives the communities less room. */
 :root,
 :root[data-density="cozy"] {
   --row-h: 44px;
@@ -139,6 +146,7 @@
   --msg-gap: 15px;
   --panel-pad: 16px;
   --section-gap: 24px;
+  --rail-w: 68px;
 }
 :root[data-density="compact"] {
   --row-h: 36px;
@@ -147,6 +155,7 @@
   --msg-gap: 10px;
   --panel-pad: 12px;
   --section-gap: 18px;
+  --rail-w: 54px;
 }
 :root[data-density="comfortable"] {
   --row-h: 52px;
@@ -155,6 +164,7 @@
   --msg-gap: 20px;
   --panel-pad: 20px;
   --section-gap: 32px;
+  --rail-w: 82px;
 }
 
 /* Ember - the default dark palette. Charcoal from the canonical library, the
@@ -609,6 +619,9 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 .badge--danger { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
 .badge--success { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
 .badge--warning { background: color-mix(in srgb, var(--warning) 16%, transparent); color: var(--warning); }
+/* A state the server has not answered yet. It is not a warning: nothing is
+   wrong, nothing is known, and the badge says so without claiming otherwise. */
+.badge--muted { background: var(--panel-3); color: var(--text-3); }
 
 .count-badge {
   min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill);
@@ -651,6 +664,12 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 .menu {
   position: fixed; z-index: var(--z-menu);
   min-width: 204px; max-height: min(420px, calc(100vh - 24px)); overflow-y: auto;
+  /* Scrolling the menu must not scroll the page behind it. A scroll that
+     reaches the document is a scroll of the window, and the window's scroll
+     closes the menu - so a menu whose items overflowed could be neither
+     scrolled nor left open. */
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   padding: 5px; background: var(--raised);
   border: 1px solid var(--line-2); border-radius: var(--radius-md);
   box-shadow: var(--shadow-3);
@@ -786,6 +805,14 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
   background: var(--app-bg);
 }
 
+/* -- the arrangement --------------------------------------------------------
+ * The reader chooses which regions of the workspace are shown. The choice is a
+ * word list on the shell root, so the stylesheet answers "is this region here"
+ * with one selector and the shell hides nothing by hand. */
+.ws:not([data-regions~="rail"]) { --rail-w: 0px; }
+.ws:not([data-regions~="rail"]) .rail { display: none; }
+.ws:not([data-regions~="column"]) .context { display: none; }
+
 /* -- the command bar ------------------------------------------------------ */
 
 .cmdbar {
@@ -798,6 +825,10 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 }
 
 .cmdbar-nav { display: none; margin-left: -2px; }
+
+/* The panel control in the command bar: it is offered only when the page on
+ * screen has a panel behind it. */
+.cmdbar-panel { flex: none; }
 
 .cmdbar-omni {
   display: flex; align-items: center; gap: 9px;
@@ -924,13 +955,42 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
   padding: 10px 8px; color: var(--text-3);
   font-size: var(--fs-meta); line-height: 1.55;
 }
+/* The row of create controls at the end of a community's column. */
+.context-actions-row {
+  display: flex; gap: 6px; padding: 8px 8px 4px; flex-wrap: wrap;
+}
 .context-foot { flex: none; border-top: 1px solid var(--line); padding: 8px; }
 
 .nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-head {
+  display: flex; align-items: center; gap: 4px;
+  padding-right: 4px;
+}
+.nav-head .nav-label { flex: 1; min-width: 0; }
 .nav-label {
   padding: 14px 8px 5px;
   font-family: var(--mono); font-size: var(--fs-micro); font-weight: 600;
   letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-3);
+}
+/* The control on a category heading. Quiet until the heading is pointed at or
+   the control itself is reached by keyboard, so the column stays a column
+   and not a wall of buttons. */
+.nav-add {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; margin-bottom: 5px;
+  border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-3); cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-1) var(--ease), background var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+.nav-group:hover .nav-add,
+.nav-add:focus-visible { opacity: 1; }
+.nav-add:hover { background: var(--hover); color: var(--text-1); }
+.nav-add:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+@media (hover: none) {
+  /* A touch screen has no hover, so the control is always there. */
+  .nav-add { opacity: 1; }
 }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
@@ -948,6 +1008,14 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 .nav-item.is-active svg { color: var(--brand); }
 .nav-item--channel { min-height: 32px; gap: 8px; }
 .nav-item--dm { gap: 9px; }
+
+/* A row being dragged, and a row that would take it. The dragged row dims and
+ * the row under the pointer says it would take it. */
+.nav-item[data-dragging], .nav-label[data-dragging] { opacity: .45; }
+.nav-item[data-dropping], .nav-label[data-dropping] {
+  outline: 1px dashed var(--brand); outline-offset: -2px;
+}
+.nav-label[data-dragging] { cursor: grabbing; }
 .nav-muted { margin-left: auto; display: inline-flex; color: var(--text-3); }
 .nav-dot { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--brand); flex: none; }
 .nav-sep { height: 1px; background: var(--line); margin: 8px 6px; }
@@ -974,6 +1042,7 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 }
 .grip--column { right: -5px; }
 .grip--inspector { left: -5px; }
+.grip--stage { right: -5px; }
 .grip::after {
   content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px;
   background: var(--brand-line); opacity: 0;
@@ -983,8 +1052,14 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 
 /* -- the stage ------------------------------------------------------------ */
 
-.stage { grid-area: stage; display: flex; min-width: 0; min-height: 0; }
-.screen { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.stage { grid-area: stage; display: flex; min-width: 0; min-height: 0; position: relative; }
+.screen {
+  display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0;
+  /* The reading column has a width the reader chooses; wider than the stage
+     and it simply fills it. */
+  max-width: var(--stage-w);
+  margin-inline: auto;
+}
 
 .stage-head {
   flex: none; display: flex; align-items: center; gap: 12px;
@@ -1128,7 +1203,12 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
  * On a desk the column is a column. On a narrow window it draws over the stage
  * instead, opened from the command bar and closed by the backdrop or Escape;
  * the inspector does the same. The line matches the media query in shell.js. */
-@media (max-width: 1080px) {
+/* The width below which the place column draws over the stage. It is the
+   same number as NARROW_WIDTH in frontend/js/shell.js, and the check in
+   frontend/tests/layout.test.js says so - a threshold in one place and not
+   the other is a sidebar that is visible in one half of the application and
+   not the other. */
+@media (max-width: 860px) {
   .cmdbar-nav { display: inline-grid; }
   .context {
     position: absolute; top: var(--cmdbar-h); bottom: 0; left: var(--rail-w); z-index: var(--z-nav);
@@ -1143,6 +1223,14 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
   .ws[data-context="open"] .scrim { display: block; }
   .grip--column { display: none; }
 }
+
+/* A line in a list of choices, as the move dialog draws them. */
+.row--button {
+  width: 100%; text-align: left; cursor: pointer;
+  border-radius: var(--radius-sm); color: var(--text-1);
+}
+.row--button:hover { background: var(--hover); }
+.row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 
 /* ---- features.css ---- */
@@ -1161,6 +1249,11 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 /* -- layout ----------------------------------------------------------------- */
 
 .fold { display: flex; flex-direction: column; gap: var(--space-6); max-width: var(--content-max); width: 100%; }
+/* A working surface. It uses the width it is given, because a workspace with
+   a list and an editor beside it is not a reading column - and a reading
+   column's width in the middle of a wide screen is what made the workspace
+   look compressed. */
+.fold--wide { max-width: none; }
 .fold--tight { gap: var(--space-3); }
 .fold--airy { gap: var(--space-8); }
 
@@ -1204,16 +1297,28 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  /* The head wraps. A title long enough to crowd the tools used to push them
+     out of the card, and the card clips its overflow, so the button was
+     simply gone - and the note beside it was drawn on top of the title. */
+  flex-wrap: wrap;
   padding: 12px 16px;
   border-bottom: 1px solid var(--line);
 }
 
-.cardhead-glyph { color: var(--text-3); display: grid; place-items: center; }
-.cardhead-label { margin: 0; font-size: var(--fs-body); font-weight: var(--weight-bold); letter-spacing: var(--tracking-tight); }
-.cardhead-note { margin-left: auto; font-size: var(--fs-micro); color: var(--text-3); text-align: right; }
-.cardhead-tools { display: flex; align-items: center; gap: var(--space-2); }
-.cardhead-note:not(:last-child) { margin-left: auto; }
-.cardhead-tools { flex: none; }
+.cardhead-glyph { color: var(--text-3); display: grid; place-items: center; flex: none; }
+/* The label may shrink, so a long title truncates instead of pushing the
+   tools out of the card. The title is a heading, so the whole of it is in
+   the accessibility tree even when it is drawn short. */
+.cardhead-label {
+  margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-body); font-weight: var(--weight-bold); letter-spacing: var(--tracking-tight);
+}
+.cardhead-note {
+  margin-left: auto; min-width: 0; font-size: var(--fs-micro); color: var(--text-3); text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cardhead-tools { display: flex; align-items: center; gap: var(--space-2); flex: none; margin-left: auto; }
+.cardhead-note + .cardhead-tools { margin-left: 0; }
 
 .cardbody { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
 .cardbody--tight { padding: var(--space-3) var(--space-4); }
@@ -1445,12 +1550,26 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 .msg-rail { position: relative; }
 .msg--continued .msg-rail { visibility: hidden; height: 0; }
 
+/* Density changes the composition and not only the measurements: a compact
+ * workspace drops the face beside each message, because the name is already
+ * on the line above it. */
+:root[data-density="compact"] .msg-rail { display: none; }
+:root[data-density="compact"] .msg--continued .msg-rail { display: none; }
+
 .msg-main { position: relative; min-width: 0; }
 
 .msg-meta { display: flex; align-items: baseline; gap: 8px; min-height: 18px; }
 .msg-author { font-weight: 700; font-size: var(--fs-sm); color: var(--text-1); }
 .msg-stamp { font-size: var(--fs-xs); color: var(--text-3); }
 .msg-edited { font-size: var(--fs-xs); color: var(--text-3); font-style: italic; }
+/* A message this device could not open. It is not an error in the message and
+   it is not empty: the text is in the envelope, and this device does not have
+   the key. */
+.msg-unreadable {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  font-style: italic;
+}
 .msg-pinflag { color: var(--text-3); display: inline-flex; vertical-align: middle; }
 .msg-sending { font-size: var(--fs-xs); color: var(--text-3); font-style: italic; }
 
@@ -1478,9 +1597,6 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 
 /* The non-image attachment row's leading glyph column. */
 .msg-file-glyph { display: grid; place-items: center; flex: none; color: var(--text-3); }
-
-/* An embed card's text column beside its optional image. */
-.msg-embed-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 
 /* The emoji face of a reaction chip: sized to the chip, not the author text. */
 .msg-reaction-emoji { line-height: 1; font-size: var(--fs-sm); }
@@ -1541,24 +1657,119 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
   max-width: 100%;
 }
 .msg-file:hover { background: var(--hover); }
+.msg-file--image { padding: 0; border: 0; background: none; display: block; max-width: 100%; }
+.msg-file--image:hover { background: none; }
 .msg-file-name { font-weight: 600; overflow-wrap: anywhere; }
 .msg-file-size { color: var(--text-3); font-size: var(--fs-xs); }
 
 .msg-embeds { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
-.msg-embed {
-  display: flex; gap: 10px; align-items: stretch;
+
+/* -- the arrangement --------------------------------------------------------- */
+.layout-regions { display: flex; flex-direction: column; gap: var(--space-3); }
+.layout-widths { display: flex; align-items: center; gap: 12px; }
+.layout-width { flex: 1; min-width: 0; accent-color: var(--brand); }
+.layout-value { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+
+/* -- the member roster --------------------------------------------------------
+ * The same roster is drawn on the members page and in the inspector beside a
+ * channel, so it has one set of rules. */
+.channel-row .cardrow-sub, .category-row .cardrow-sub { white-space: normal; }
+.member-panel { display: flex; flex-direction: column; gap: 10px; }
+.member-head { display: flex; align-items: center; gap: 10px; }
+.member-search { flex: 1; min-width: 0; }
+.member-count { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.member-list { border-top: 1px solid var(--line); }
+.member-row .cardrow-meta { min-width: 68px; text-align: right; }
+.member-presence { color: var(--text-3); }
+.member-presence[data-presence="online"] { color: var(--success); }
+.member-presence[data-presence="idle"] { color: var(--warning); }
+.member-presence[data-presence="dnd"] { color: var(--danger); }
+.member-more { display: flex; justify-content: center; padding: 10px 0; }
+
+/* -- link previews -----------------------------------------------------------
+ * A preview is a card: a picture or a player when the page had one, and the
+ * page's own words when it did not. The site is named by a tile of its first
+ * letter rather than by a favicon - a favicon is a request to an arbitrary
+ * host on behalf of every reader who opens the channel. */
+.embed-card {
+  display: flex; flex-direction: column; gap: 8px;
+  max-width: 520px;
   border: 1px solid var(--line-2); border-left: 3px solid var(--brand);
   border-radius: var(--radius-md); padding: 10px; background: var(--panel-2);
-  color: var(--text-1); text-decoration: none; max-width: 520px;
 }
-.msg-embed:hover { border-color: var(--line-3); }
-.msg-embed-host { display: block; font-size: var(--fs-xs); color: var(--text-3); }
-.msg-embed-title { display: block; font-weight: 600; }
-.msg-embed-text {
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-  overflow: hidden; color: var(--text-2); font-size: var(--fs-sm);
+.embed-card:hover { border-color: var(--line-3); }
+.embed-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.embed-site { display: flex; align-items: center; gap: 7px; margin: 0; }
+.embed-tile {
+  display: grid; place-items: center;
+  width: 20px; height: 20px; flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--panel-3); color: var(--text-2);
+  font-size: var(--fs-xs); font-weight: var(--weight-bold); text-transform: uppercase;
 }
-.msg-embed-image { width: 96px; height: 96px; object-fit: cover; border-radius: var(--radius-md); border: 1px solid var(--line-2); }
+.embed-site-name {
+  font-size: var(--fs-xs); color: var(--text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.embed-title {
+  display: block; color: var(--text-1); font-weight: 600; text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.embed-title:hover { color: var(--brand); }
+.embed-text {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden; margin: 0; color: var(--text-2); font-size: var(--fs-sm);
+}
+.embed-host { margin: 0; font-size: var(--fs-xs); color: var(--text-3); }
+.embed-original {
+  align-self: flex-start; margin-top: 2px;
+  font-size: var(--fs-xs); color: var(--brand); text-decoration: none;
+}
+.embed-original:hover { text-decoration: underline; }
+.embed-media {
+  display: block; padding: 0; border: 0; background: none; cursor: zoom-in;
+  border-radius: var(--radius-md); overflow: hidden; max-width: 100%;
+}
+.embed-media:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.embed-image {
+  display: block; max-width: min(420px, 100%); max-height: 320px;
+  object-fit: contain; border-radius: var(--radius-md); border: 1px solid var(--line-2);
+}
+.embed-video {
+  display: block; width: 100%; max-width: 480px; aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md); border: 1px solid var(--line-2); background: var(--panel-3);
+}
+/* A preview the server could not describe is the link and nothing else. */
+.embed-plain {
+  align-self: flex-start; margin-top: 4px;
+  color: var(--brand); font-size: var(--fs-sm); overflow-wrap: anywhere;
+}
+
+/* -- the lightbox ------------------------------------------------------------
+ * An image opened from a message, read large, with the other images of the
+ * message a keypress away. */
+.dialog--lightbox { max-width: min(1100px, 94vw); width: 94vw; background: transparent; }
+.dialog--lightbox .dialog-body { padding: 0; }
+.lightbox { display: flex; flex-direction: column; gap: 8px; }
+.lightbox-image {
+  display: block; max-width: 100%; max-height: 74vh; margin: 0 auto;
+  object-fit: contain; border-radius: var(--radius-md); background: var(--panel-3);
+}
+.lightbox-bar { display: flex; align-items: center; gap: 10px; }
+.lightbox-caption {
+  flex: 1; min-width: 0; margin: 0; color: var(--text-2); font-size: var(--fs-sm);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lightbox-count { color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.lightbox-close, .lightbox-nav {
+  display: grid; place-items: center; width: 36px; height: 36px; flex: none;
+  border: 1px solid var(--line-2); border-radius: var(--radius-md);
+  background: var(--panel-2); color: var(--text-2);
+}
+.lightbox-close:hover, .lightbox-nav:hover { background: var(--hover); color: var(--text-1); }
+.lightbox-nav { position: absolute; top: 50%; transform: translateY(-50%); }
+.lightbox-nav--prev { left: 8px; }
+.lightbox-nav--next { right: 8px; }
 
 .msg-reactions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .msg-reaction {
@@ -1807,12 +2018,12 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
   color: var(--brand); text-decoration: underline; font: inherit; font-size: var(--fs-sm);
 }
 .voice-dock__controls { display: flex; align-items: center; gap: var(--space-2); justify-content: flex-end; }
-.dock-btn--round {
+.dock-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 38px; height: 38px; border-radius: 999px;
   background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text-1);
   cursor: pointer;
 }
+.dock-btn--round { width: 38px; height: 38px; border-radius: 999px; }
 .dock-btn--round:hover { background: var(--hover); }
 .dock-btn--round.is-off { color: var(--danger); border-color: var(--danger); }
 .dock-btn--round.is-off:hover { background: var(--panel-2); }
@@ -1963,7 +2174,10 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
   grid-template-columns: minmax(0, 240px) minmax(0, 1fr);
   gap: var(--space-6);
   align-items: start;
-  max-width: var(--content-max);
+  /* A studio is a working surface, not an article: it is allowed to be wide.
+     The reading width is for the things a person reads, and a workspace with
+     a list and an editor beside it is not one of them. */
+  max-width: var(--workspace-max);
   width: 100%;
 }
 .studionav {
@@ -2007,7 +2221,7 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 .studionav-link--active { background: var(--selected); color: var(--brand); font-weight: var(--weight-strong); }
 .studionav-link svg { flex: none; opacity: 0.85; }
 .studionav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.studio-stage { min-width: 0; }
+.studio-stage { min-width: 0; max-width: none; }
 
 /* -- stats ------------------------------------------------------------------- */
 
@@ -2143,6 +2357,352 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 /* -- anchor offset ----------------------------------------------------------- */
 
 .anchor { scroll-margin-top: var(--space-6); }
+
+/* -- the page editor --------------------------------------------------------- */
+/* One block of a page body, and the two ways of writing the same body. The
+   editor is a working surface: the blocks are stacked, each one named, and
+   the tools sit at the right of the name. */
+
+.pageblock {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pageblock-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.pageblock-kind {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.pageblock-body { display: flex; flex-direction: column; gap: var(--space-2); }
+.pageblock-row { display: flex; gap: var(--space-2); align-items: flex-start; }
+.pageblock-row > .input, .pageblock-row > .select { flex: 1 1 0; min-width: 0; }
+.pageblock-row > .select { flex: 0 0 140px; }
+.pageblock-items { display: flex; flex-direction: column; gap: var(--space-2); }
+.pageblock-item { display: flex; gap: var(--space-2); align-items: center; }
+.pageblock-item > .input { flex: 1 1 auto; min-width: 0; }
+
+.icon-btn--sm { width: 26px; height: 26px; }
+
+.page-source {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  min-height: 320px;
+}
+
+/* The preview is the server's own rendering of the body, shown in the reading
+   column a visitor gets. */
+.page-preview {
+  max-width: 62ch;
+  font-size: var(--fs-body);
+  line-height: 1.65;
+  color: var(--text-2);
+}
+.page-preview:empty { display: none; }
+.page-preview h2 { color: var(--text-1); margin: var(--space-6) 0 var(--space-2); }
+.page-preview h3 { color: var(--text-1); margin: var(--space-5) 0 var(--space-2); }
+.page-preview p { margin: 0 0 var(--space-3); }
+.page-preview p.lede { color: var(--text-2); font-size: var(--fs-body); }
+.page-preview ul, .page-preview ol { padding-left: var(--space-5); margin: 0 0 var(--space-3); }
+.page-preview li { margin-bottom: var(--space-1); }
+.page-preview a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.page-preview blockquote {
+  margin: var(--space-4) 0;
+  padding: var(--space-2) var(--space-4);
+  border-left: 3px solid var(--brand-line);
+}
+.page-preview pre {
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  overflow-x: auto;
+}
+/* The blocks the server's renderer emits for the newer block types. The
+   picture, the table and the quotation's attribution each carry a class the
+   renderer puts there, so the preview and the published page can be told
+   apart from ordinary prose. */
+.page-preview figure.page-image { margin: var(--space-4) 0; }
+.page-preview figure.page-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+}
+.page-preview footer.page-quote-source {
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  margin-top: var(--space-2);
+}
+.page-preview table.page-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-4) 0;
+  font-size: var(--fs-sm);
+}
+.page-preview table.page-table caption {
+  text-align: left;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  padding-bottom: var(--space-2);
+}
+.page-preview table.page-table th,
+.page-preview table.page-table td {
+  border: 1px solid var(--line);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  vertical-align: top;
+}
+.page-preview table.page-table th {
+  background: var(--panel-3);
+  color: var(--text-1);
+  font-weight: var(--weight-semibold);
+}
+.page-preview pre.page-code code { font-family: var(--mono); font-size: var(--fs-sm); }
+
+/* The table editor's grid. A real table, so the columns line up; the rule is
+   what makes it look like an editor rather than a spreadsheet. */
+.pageblock-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-2) 0;
+  font-size: var(--fs-sm);
+}
+.pageblock-table th,
+.pageblock-table td {
+  border: 1px solid var(--line);
+  padding: var(--space-2);
+  vertical-align: top;
+}
+.pageblock-table th { background: var(--panel-3); color: var(--text-1); font-weight: var(--weight-semibold); }
+.pageblock-table th .input, .pageblock-table td .input { width: 100%; }
+.page-preview .draft-note {
+  background: var(--panel-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin: var(--space-4) 0;
+}
+
+/* The comparison of a draft against the published page. */
+.pagediff {
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  line-height: 1.6;
+  max-height: 60vh;
+  overflow: auto;
+}
+.pagediff-line { display: flex; gap: var(--space-2); white-space: pre-wrap; }
+.pagediff-mark { flex: none; width: 1ch; color: var(--text-3); }
+.pagediff-text { min-width: 0; }
+.pagediff-line--added { background: color-mix(in srgb, var(--success) 12%, transparent); }
+.pagediff-line--removed { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.pagediff-line--added .pagediff-mark { color: var(--success); }
+.pagediff-line--removed .pagediff-mark { color: var(--danger); }
+
+/* == search, collections, themes, incidents and reports ======================
+ *
+ * The surfaces of the 3.0 release: the search panel with its filter bar, the
+ * collections a reader saves things into, the theme packages an operator
+ * imports, the incident timeline and the cross-instance reports. Colours from
+ * tokens only; one block per kit area.
+ */
+
+/* -- the search panel -------------------------------------------------------- */
+
+.search-bar { display: flex; gap: var(--space-3); align-items: center; }
+.search-input { flex: 1; }
+.search-note { margin: 0 0 var(--space-2); color: var(--text-3); font-size: var(--fs-xs); }
+.search-results { display: flex; flex-direction: column; }
+.search-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+.search-main { min-width: 0; }
+.search-side { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+@media (max-width: 1000px) {
+  .search-layout { grid-template-columns: minmax(0, 1fr); }
+}
+.search-hit { align-items: start; }
+.search-hit-glyph { display: inline-flex; color: var(--text-3); }
+.saved-row, .history-row { cursor: pointer; }
+
+/* -- the filter bar ---------------------------------------------------------- */
+
+.filter-bar { display: grid; gap: var(--space-3); position: relative; }
+.filter-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.filter-chips:empty { display: none; }
+.filter-chip {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  padding: 3px 6px 3px 10px; border-radius: var(--radius-pill);
+  background: var(--brand-soft); border: 1px solid var(--brand-line);
+  color: var(--brand); font-size: var(--fs-xs); font-weight: var(--weight-medium);
+}
+.filter-chip-text { font-family: var(--mono); }
+.filter-chip-remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: transparent; color: inherit; cursor: pointer;
+}
+.filter-chip-remove:hover { background: color-mix(in srgb, var(--brand) 22%, transparent); }
+.filter-chip-remove:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.filter-row { display: flex; gap: var(--space-2); align-items: center; }
+.filter-field { width: min(320px, 100%); font-family: var(--mono); }
+.filter-note { margin: 0; min-height: 1.2em; color: var(--text-3); font-size: var(--fs-xs); }
+.filter-note.is-warn { color: var(--danger); }
+.filter-suggestions {
+  list-style: none; margin: 0; padding: var(--space-1);
+  display: grid; gap: 2px;
+  border: 1px solid var(--line-2); border-radius: var(--radius-md);
+  background: var(--raised); box-shadow: var(--shadow-2);
+}
+.filter-suggestion { list-style: none; }
+.filter-suggestion-button {
+  display: grid; grid-template-columns: auto auto 1fr; gap: var(--space-2);
+  align-items: baseline; width: 100%; text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: inherit; cursor: pointer; font: inherit;
+}
+.filter-suggestion-button:hover { background: var(--hover); }
+.filter-suggestion-button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.filter-suggestion-key { font-family: var(--mono); color: var(--brand); font-weight: var(--weight-strong); }
+.filter-suggestion-label { font-size: var(--fs-sm); color: var(--text-1); }
+.filter-suggestion-value { font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-2); }
+.filter-suggestion-hint { font-size: var(--fs-xs); color: var(--text-3); grid-column: 1 / -1; }
+
+/* -- the collections --------------------------------------------------------- */
+
+.collection-layout {
+  display: grid;
+  /* The list is a panel of a sensible width and the thing beside it takes
+     the rest. Proportional columns gave the list two fifths of the screen -
+     a list of document titles two fifths of the screen wide, with the editor
+     squeezed into what was left. */
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+.collection-layout > * { min-width: 0; }
+@media (max-width: 1000px) {
+  .collection-layout { grid-template-columns: minmax(0, 1fr); }
+}
+.collection-list, .collection-detail { display: flex; flex-direction: column; }
+.collection-row { cursor: pointer; }
+.collection-item-glyph { display: inline-flex; color: var(--text-3); }
+.collection-item { align-items: start; }
+.collection-link { color: var(--brand); }
+.collection-head {
+  display: flex; align-items: start; justify-content: space-between;
+  gap: var(--space-4); padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line); margin-bottom: var(--space-3);
+}
+.collection-head-main { min-width: 0; }
+.collection-title { margin: 0; font-size: var(--fs-h3); font-weight: var(--weight-strong); }
+.collection-meta { margin: 2px 0 0; color: var(--text-3); font-size: var(--fs-xs); }
+.collection-head-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.collection-add { margin-top: var(--space-3); }
+.collection-pick { width: 100%; text-align: left; }
+
+/* -- the cross-instance reports ----------------------------------------------- */
+
+.federation-row { align-items: start; }
+.federation-glyph { display: inline-flex; color: var(--text-3); }
+.disclosure {
+  display: grid; gap: var(--space-2);
+  padding: var(--space-4); border: 1px solid var(--line-2);
+  border-radius: var(--radius-md); background: var(--panel-2);
+}
+.disclosure-title { margin: 0; font-size: var(--fs-sm); font-weight: var(--weight-strong); color: var(--text-1); }
+.disclosure-list { margin: 0; padding-left: var(--space-5); color: var(--text-2); font-size: var(--fs-sm); line-height: 1.6; }
+.disclosure-holder:empty { display: none; }
+
+/* -- the incident timeline ---------------------------------------------------- */
+
+.incident-timeline { display: grid; gap: var(--space-4); }
+.incident {
+  display: grid; gap: var(--space-1);
+  padding: var(--space-4); border: 1px solid var(--line);
+  border-left: 3px solid var(--brand-line);
+  border-radius: var(--radius-md); background: var(--panel-2);
+}
+.incident-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.incident-status {
+  display: inline-flex; align-items: center;
+  padding: 2px 9px; border-radius: var(--radius-pill);
+  background: var(--panel-3); color: var(--text-2);
+  font-size: var(--fs-xs); font-weight: var(--weight-strong);
+}
+.incident-status[data-tone="warning"] { background: color-mix(in srgb, var(--warning) 16%, transparent); color: var(--warning); }
+.incident-status[data-tone="success"] { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+.incident-status[data-tone="info"] { background: var(--brand-soft); color: var(--brand); }
+.incident-time { color: var(--text-3); font-size: var(--fs-xs); }
+.incident-title { margin: 0; font-size: var(--fs-h3); font-weight: var(--weight-strong); }
+.incident-summary { margin: 0; color: var(--text-2); line-height: 1.6; }
+.incident-body { margin: 0; color: var(--text-3); line-height: 1.6; }
+.incident-row { align-items: start; }
+.incident-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+
+/* -- the language ------------------------------------------------------------- */
+
+.language-row { cursor: pointer; }
+.language-glyph { display: inline-flex; color: var(--text-3); }
+.language-sample { margin: 0; color: var(--text-2); }
+
+/* -- the theme packages ------------------------------------------------------- */
+
+.theme-change {
+  display: grid; grid-template-columns: 100px 1fr; gap: var(--space-3);
+  align-items: center; padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.theme-change:last-child { border-bottom: 0; }
+.theme-change-label { color: var(--text-2); font-size: var(--fs-sm); }
+.theme-change-pair { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.theme-change-swatch {
+  display: inline-block; width: 18px; height: 18px;
+  border-radius: var(--radius-xs); border: 1px solid var(--line-2);
+}
+.theme-change-value { font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-2); }
+.theme-preview { display: grid; gap: var(--space-3); }
+.theme-preview-holder:empty { display: none; }
+.theme-problems { margin: 0; padding-left: var(--space-5); color: var(--danger); font-size: var(--fs-sm); line-height: 1.6; }
+.theme-changes { display: grid; }
+.theme-package { font-family: var(--mono); font-size: var(--fs-xs); }
+.theme-tokens { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.theme-token { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--fs-xs); color: var(--text-2); }
+.theme-row-item { align-items: start; }
+
+/* -- the template picker ------------------------------------------------------ */
+
+.template-list { display: flex; flex-direction: column; }
+.template-item {
+  display: flex; align-items: start; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-3) 0; border-bottom: 1px solid var(--line);
+}
+.template-item:last-child { border-bottom: 0; }
+.template-item-main { display: grid; gap: 2px; min-width: 0; }
+.template-item-name { font-size: var(--fs-sm); font-weight: var(--weight-strong); color: var(--text-1); }
+.template-item-shortcut { font-family: var(--mono); font-size: var(--fs-xs); color: var(--brand); }
+.template-item-body { font-size: var(--fs-xs); color: var(--text-3); overflow-wrap: anywhere; }
+.template-item-actions { display: flex; gap: var(--space-2); flex: none; }
 
 
 /* ---- entry.css ---- */
@@ -2328,3 +2888,34 @@ code, kbd, pre, samp { font-family: var(--mono); font-size: 0.9em; }
 .paper-lede { margin: var(--space-3) 0 0; color: var(--text-2); font-size: var(--fs-body); max-width: 58ch; line-height: 1.65; }
 .paper .actionline { margin-top: var(--space-5); }
 .paper-note { margin: var(--space-5) 0 0; padding-top: var(--space-3); border-top: 1px solid var(--line); font-size: var(--fs-sm); color: var(--text-3); }
+
+/* -- accepting the documents ------------------------------------------------- */
+/* The acceptance control on the registration form: the checkbox, the links to
+   the two documents, and the versions that are being accepted.
+   It is a block of its own rather than a line at the bottom of a long form,
+   because it is the one control on the form a reader cannot do without. */
+
+.gate-legal-block {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  margin: 0 0 var(--space-4); padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line-2); border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+.gate-legal-block.is-accepted { border-color: color-mix(in srgb, var(--success) 40%, var(--line-2)); }
+.gate-legal-heading {
+  margin: 0; font-size: var(--fs-sm); font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-3);
+}
+.gate-legal-lede { margin: 0; font-size: var(--fs-sm); color: var(--text-2); line-height: 1.55; }
+.gate-legal { align-items: flex-start; margin-top: var(--space-1); color: var(--text-1); line-height: 1.5; }
+.gate-legal a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.gate-legal-text { display: flex; flex-direction: column; gap: 2px; }
+.gate-legal-title { font-weight: var(--weight-medium); }
+.gate-legal-meta { color: var(--text-3); font-size: var(--fs-meta); }
+.gate-legal-version.is-missing { color: var(--warning); }
+.gate-legal-state { font-weight: var(--weight-medium); }
+.gate-legal-block.is-accepted .gate-legal-state { color: var(--success); }
+
+/* The reason the button is closed. A disabled control with no reason is the
+   control everybody works around. */
+.gate-submit-note { margin: var(--space-2) 0 0; font-size: var(--fs-meta); color: var(--text-3); text-align: center; }

@@ -6,12 +6,12 @@
 // flow, drawn for a phone.
 
 import { el } from '../../../packages/dom.js';
-import { icon } from '../../../packages/icons.js';
 import { brandMark } from '../../../packages/brand.js';
 import Api from '../../../packages/api.js';
 import TrycordConfig from '../../../packages/config.js';
-import { currentQuery, navigate, path } from '../../../packages/nav.js';
-import { applyToken, loadSession, logout, refreshServers } from '../../../packages/store.js';
+import { currentQuery, navigate, path, publicPath } from '../../../packages/nav.js';
+import { State, applyToken, loadLegal, loadSession, logout, refreshServers } from '../../../packages/store.js';
+import { withLegalVersions, isStaleLegalError } from '../../../packages/legal.js';
 import { connect } from '../../../packages/realtime.js';
 import { toast } from '../ui.js';
 import { textInput, field } from './util.js';
@@ -28,14 +28,14 @@ function busy(form, isBusy) {
   form.setAttribute('aria-busy', isBusy ? 'true' : 'false');
 }
 
-function showError(form, error) {
+function showError(form, error, action) {
   const message = error && error.message ? error.message : 'That did not work.';
   let box = form.querySelector('.m-form-error');
   if (!box) {
     box = el('div', { class: 'm-form-error', role: 'alert' });
     form.insertBefore(box, form.firstChild);
   }
-  box.textContent = message;
+  box.replaceChildren(el('span', {}, message), action || null);
 }
 
 function nextTarget() {
@@ -101,31 +101,107 @@ function loginForm() {
     el('a', { href: path('/forgot') }, 'Forgot password?'))];
 }
 
+// The acceptance control. The server records the exact versions the reader
+// accepted and refuses a registration whose versions are not the ones in
+// force, so the form states which versions they are and cannot be submitted
+// until they are accepted.
+function legalAcceptance() {
+  const accepted = el('input', { type: 'checkbox', class: 'm-check' });
+  const versions = el('span', { class: 'm-auth__legal-version' });
+  const state = el('span', { class: 'm-auth__legal-state' });
+  const label = el('label', { class: 'm-check-row m-auth__legal' },
+    accepted,
+    el('span', {},
+      el('span', { class: 'm-auth__legal-title' },
+        'I accept the ',
+        el('a', { href: publicPath('/terms'), target: '_blank', rel: 'noopener' }, 'Terms of Service'),
+        ' and the ',
+        el('a', { href: publicPath('/privacy'), target: '_blank', rel: 'noopener' }, 'Privacy Policy')),
+      el('span', { class: 'm-auth__legal-meta' }, versions, ' ', state)));
+
+  // A block of its own, above the fields. On a phone the bottom of a form is
+  // below the fold, and a control a reader cannot do without has to be where
+  // they can see it.
+  const block = el('section', { class: 'm-auth__legal-block' },
+    el('p', { class: 'm-eyebrow' }, 'Before you can join'),
+    el('p', { class: 'm-lede' },
+      'This instance runs on its own rules, and an account here is bound by them. '
+      + 'Read both documents, then accept them.'),
+    label);
+
+  const paintVersions = () => {
+    const legal = State.legal;
+    versions.textContent = legal && legal.termsVersion
+      ? 'Terms v' + legal.termsVersion + ', Privacy v' + legal.privacyVersion + '.'
+      : 'This instance has not said which version is in force.';
+  };
+  const paintState = () => {
+    const on = !!accepted.checked;
+    state.textContent = on ? 'Accepted.' : 'Not accepted yet.';
+    block.classList.toggle('is-accepted', on);
+  };
+  accepted.addEventListener('change', paintState);
+  paintVersions();
+  paintState();
+
+  return { accepted, label, block, paintVersions, paintState };
+}
+
 function registerForm() {
   const username = textInput({ name: 'username', autocomplete: 'username' });
   const display = textInput({ name: 'displayName' });
   const email = textInput({ name: 'email', type: 'email' });
   const password = textInput({ name: 'password', type: 'password', autocomplete: 'new-password' });
+  const legal = legalAcceptance();
+  const submit = el('button', { class: 'm-btn m-btn--primary m-btn--block', type: 'submit' }, 'Create account');
   const form = el('form', { class: 'm-auth__form' },
     el('p', { class: 'm-auth__instance' },
       'Joining ', el('strong', {}, TrycordConfig.backendUrl())),
+    legal.block,
     field({ label: 'Username', control: username }),
     field({ label: 'Display name', control: display }),
     field({ label: 'Email (optional)', control: email }),
     field({ label: 'Password', control: password }),
-    el('button', { class: 'm-btn m-btn--primary m-btn--block', type: 'submit' }, 'Create account'));
+    submit);
+
+  // The form cannot be sent until the documents are accepted, and the button
+  // says why: a disabled control with no reason is the control everybody
+  // works around.
+  const submitNote = el('p', { class: 'm-auth__submit-note' });
+  submit.insertAdjacentElement('afterend', submitNote);
+  const syncSubmit = () => {
+    submit.disabled = !legal.accepted.checked;
+    submitNote.textContent = legal.accepted.checked
+      ? ''
+      : 'Accept the Terms of Service and the Privacy Policy to create an account.';
+    legal.paintState();
+  };
+  legal.accepted.addEventListener('change', syncSubmit);
+  syncSubmit();
+
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (!legal.accepted.checked) {
+      showError(form, { message: 'Accept the Terms of Service and the Privacy Policy to continue.' });
+      return;
+    }
     busy(form, true);
     try {
-      const out = await Api.register({
+      // The versions come from the instance, never from this file.
+      if (!State.legal) {
+        try { await loadLegal(); } catch { /* the refusal below says so */ }
+        legal.paintVersions();
+      }
+      if (!State.legal) {
+        showError(form, { message: 'This instance did not say which terms are in force. Reload the page and try again.' });
+        return;
+      }
+      const out = await Api.register(withLegalVersions({
         username: username.value.trim(),
         displayName: display.value.trim() || undefined,
         email: email.value.trim() || undefined,
         password: password.value,
-        termsVersion: '1.0',
-        privacyVersion: '1.0',
-      });
+      }, State.legal));
       if (out && out.token) {
         applyToken(out.token, out.user);
         await afterSignIn('/home');
@@ -133,8 +209,19 @@ function registerForm() {
         toast('Account created. Check your email to continue.', { type: 'success' });
         navigate('/login', { replace: true });
       }
-    } catch (error) { showError(form, error); }
-    finally { busy(form, false); }
+    } catch (error) {
+      if (isStaleLegalError(error)) {
+        showError(form, {
+          message: 'The Terms or Privacy Policy changed since this page was opened. Reload to read the current version.',
+        }, el('button', {
+          class: 'm-btn m-btn--default', type: 'button',
+          onClick: () => window.location.reload(),
+        }, 'Reload'));
+      } else {
+        showError(form, error);
+      }
+    }
+    finally { busy(form, false); syncSubmit(); }
   });
   return [form, el('p', { class: 'm-auth__alt' }, 'Already have an account? ', el('a', { href: path('/login') }, 'Sign in'))];
 }
@@ -168,8 +255,12 @@ function resetForm(token) {
     event.preventDefault();
     busy(form, true);
     try {
-      await Api.resetPassword({ token, newPassword: next.value, confirmPassword: confirm.value });
-      toast('Password set. Sign in with it.', { type: 'success' });
+      const out = await Api.resetPassword({ token, newPassword: next.value, confirmPassword: confirm.value });
+      // An account with a second factor gets a challenge rather than a session:
+      // the password is changed, and the sign-in still owes the second step.
+      toast(out && out.mfaRequired
+        ? 'Password set. Sign in with your two-step code.'
+        : 'Password set. Sign in with it.', { type: 'success' });
       navigate('/login', { replace: true });
     } catch (error) { showError(form, error); }
     finally { busy(form, false); }

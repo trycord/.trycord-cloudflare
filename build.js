@@ -13,7 +13,7 @@
 // both, is cheaper than two that agree today.
 //
 // Usage:
-//   node build.js                       # build PRODUCT_REF (default: main)
+//   node build.js                       # build the release line (default: release/3.0.0)
 //   TRYCORD_REF=<sha> node build.js     # pin an exact commit
 //   TRYCORD_REPO=<path-or-url> node build.js
 const { execFileSync } = require('child_process');
@@ -28,7 +28,14 @@ const path = require('path');
 // be the tree of a previous build, published as if it were new. The build now
 // refuses to fetch itself, and the default is the product repository again.
 const REPO = process.env.TRYCORD_REPO || 'https://github.com/trycord/.trycord.git';
-const REF = process.env.TRYCORD_REF || 'main';
+
+// The ref the deployment is built from.
+//
+// The release line, not the development branch: this deployment is the
+// deployment of a release, and a build of the development branch is a
+// deployment of something that has not been released. Pin a commit with
+// TRYCORD_REF for a deployment that has to be the same tree twice.
+const REF = process.env.TRYCORD_REF || 'release/3.0.0';
 
 // The repository this deployment itself lives in.
 //
@@ -77,74 +84,92 @@ function fetchSource() {
       + '; set TRYCORD_REPO to it, or leave TRYCORD_REPO unset.',
     );
   }
-  const isLocal = !/^(https?:|git@|ssh:)/.test(REPO);
-  const bare = isLocal || looksLikeSha;
+  // A path on this machine is the offline and development case. A URL is
+  // what a deployment fetches from, and the two are fetched differently: a
+  // local path cannot do a shallow fetch, and a URL can.
+  //
+  // `file:` is a URL. It is what the checks use, so that they exercise the
+  // same path a deployment takes - the shallow clone, the fetch by id, the
+  // FETCH_HEAD - without a network.
+  const isLocal = !/^(https?:|git@|ssh:|file:)/.test(REPO);
   if (!fs.existsSync(path.join(SRC, '.git'))) {
     fs.rmSync(SRC, { recursive: true, force: true });
     fs.mkdirSync(path.dirname(SRC), { recursive: true });
     process.stdout.write(`cloning ${REPO} @ ${REF}\n`);
-    // A local path is the offline/dev case and cannot do a shallow branch
-    // fetch, so it is cloned whole and then checked out.
     if (isLocal) {
+      // A local path cannot do a shallow branch fetch, so it is cloned
+      // whole and then fetched below.
       git('clone', '--quiet', REPO, SRC);
     } else if (looksLikeSha) {
       // Nothing is checked out yet, so the commit still has to be fetched.
       git('clone', '--quiet', '--filter=blob:none', '--no-checkout', REPO, SRC);
-      git('-C', SRC, 'fetch', '--quiet', '--depth', '1', 'origin', REF);
     } else {
       git('clone', '--quiet', '--depth', '1', '--branch', REF, REPO, SRC);
     }
   } else {
     process.stdout.write(`updating source to ${REF}\n`);
-    if (isLocal && !looksLikeSha) {
-      git('-C', SRC, 'fetch', '--quiet', 'origin');
-    } else if (isLocal) {
-      // A commit id is a commit, not a branch, so it is fetched by id.
-      git('-C', SRC, 'fetch', '--quiet', 'origin', REF);
-    } else if (looksLikeSha) {
+  }
+
+  // The ref that was asked for, fetched.
+  //
+  // Always fetched, even when the clone already has it. Two reasons:
+  //
+  //   FETCH_HEAD is what a fetch writes, and it is the only way to say "the
+  //   thing that was just fetched" rather than "the branch that was there
+  //   before" - checking out the local branch after a fetch keeps the old
+  //   commit, because the branch only moves when it is merged, and a build
+  //   that fetched the newest source and then checked out 'main' deployed
+  //   the previous one.
+  //
+  //   A clone writes no FETCH_HEAD at all. `git clone --depth 1 --branch
+  //   main` leaves the file absent, so the checkout of it failed with
+  //   "pathspec 'FETCH_HEAD' did not match any file(s) known to git" - and
+  //   that is the failure the deployment reported.
+  if (isLocal) {
+    git('-C', SRC, 'fetch', '--quiet', 'origin', REF);
+  } else {
+    try {
+      git('-C', SRC, 'fetch', '--quiet', '--depth', '1', 'origin', REF);
+    } catch (error) {
       // A commit that is already in the clone cannot be fetched again by id:
       // the server refuses to serve an object it did not advertise, and the
       // fetch fails even though the commit is right there. So the fetch is
       // attempted, and the commit is looked for locally when it is refused.
-      try {
-        git('-C', SRC, 'fetch', '--quiet', '--depth', '1', 'origin', REF);
-      } catch (error) {
-        if (!commitIsPresent(REF)) throw error;
-        process.stdout.write('  the commit is already in the clone\n');
-      }
-    } else {
-      git('-C', SRC, 'fetch', '--quiet', '--depth', '1', 'origin', REF);
+      if (!looksLikeSha || !commitIsPresent(REF)) throw error;
+      process.stdout.write('  the commit is already in the clone\n');
     }
   }
+
   // What was just fetched, not the branch that was there before.
   //
-  // Checking out the local branch after a fetch keeps the old commit: the
-  // branch only moves when it is merged, so a build that fetched the newest
-  // source and then checked out 'main' deployed the previous one. FETCH_HEAD
-  // is what was actually fetched.
+  // The commit is checked out rather than the ref. A commit id is always
+  // something git knows about; a ref name is not - `origin/<sha>` is not a
+  // thing git has ever heard of, and that was the other half of the same
+  // failure: a pinned build of a local repository failed with "pathspec
+  // did not match any file(s) known to git".
   //
   // A checkout that fails is a build that stops, not a build that publishes
   // the tree of the last one. The tree is removed at the start of the build
   // for the same reason: a failed checkout must not leave a tree that a
   // deploy would then publish.
-  if (looksLikeSha) {
-    // A commit id is not a ref name. `origin/<sha>` is not a thing git knows
-    // about, so a pinned build of a local repository failed with "pathspec
-    // did not match any file(s) known to git" - which is the same failure
-    // the deployment reported, from the other direction.
-    if (isLocal) {
-      git('-C', SRC, 'checkout', '--quiet', '--force', REF);
-    } else {
-      git('-C', SRC, 'checkout', '--quiet', '--force', 'FETCH_HEAD');
-    }
-  } else if (isLocal) {
-    git('-C', SRC, 'checkout', '--quiet', '--force', 'origin/' + REF);
-  } else {
-    git('-C', SRC, 'checkout', '--quiet', '--force', 'FETCH_HEAD');
-  }
+  const target = fetchedCommit();
+  git('-C', SRC, 'checkout', '--quiet', '--force', target);
   const head = git('-C', SRC, 'rev-parse', 'HEAD');
   process.stdout.write(`source at ${head}\n`);
   return head;
+}
+
+// The commit that was just fetched.
+//
+// A fetch writes FETCH_HEAD, and that is what is read here. If there is no
+// FETCH_HEAD - a clone that was not followed by a fetch - the commit the
+// clone left checked out is the one that was fetched.
+function fetchedCommit() {
+  try {
+    return git('-C', SRC, 'rev-parse', '--verify', 'FETCH_HEAD^{commit}');
+  } catch {
+    return git('-C', SRC, 'rev-parse', '--verify', 'HEAD^{commit}');
+  }
 }
 
 // Whether the clone already holds a commit.

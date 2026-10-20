@@ -53,6 +53,44 @@ export const PAGES = [
     nav: { label: 'Menu', short: 'Menu', icon: 'menu', mobile: true, tabOrder: 5 },
   }),
 
+  // ---- what the reader keeps, and what happened to the instance.
+  //
+  // These are the reader's own destinations: the search that carries the
+  // filters, the collections they save into, the reports they have filed
+  // about other instances, and the timeline of what has happened here.
+  p('search', '/search', {
+    layout: 'plain',
+    nav: { label: 'Search', short: 'Search', icon: 'search', global: true },
+  }),
+  p('collections', '/collections', {
+    layout: 'plain',
+    nav: { label: 'Collections', short: 'Collections', icon: 'folder', global: true },
+  }),
+  // The extension console and the developer console. Both are places a person
+  // goes deliberately rather than a rail everybody sees, so neither is in the
+  // global navigation - but both answer to the finder, and both are linked
+  // from the place they belong to.
+  p('extensions', '/extensions', {
+    layout: 'plain', sidebar: 'profile',
+    label: 'Extensions', icon: 'grid',
+    blurb: 'What this instance can run, and what is running',
+  }),
+  p('developer', '/developer', {
+    layout: 'plain', sidebar: 'profile',
+    label: 'Developer', icon: 'code',
+    blurb: 'Your API keys and the applications of your communities',
+  }),
+  p('federation', '/federation', {
+    layout: 'plain',
+    nav: { label: 'Federation reports', short: 'Federation', icon: 'share' },
+  }),
+  // The incident timeline is for everybody, including readers who are not
+  // signed in: a status page is for the people who are affected by something.
+  p('status', '/status', {
+    access: 'public', layout: 'plain',
+    nav: { label: 'Service status', short: 'Status', icon: 'activity', global: true },
+  }),
+
   // ---- the community tree. /c/:slug is the current spelling and /server/:id the
   // legacy one; both resolve here and the shell only ever sees the id form.
   p('community', '/c/:slug', { layout: 'channel', sidebar: 'community', hidden: true }),
@@ -70,6 +108,49 @@ export const PAGES = [
   p('community.invites', '/server/:id/invites', { layout: 'channel', sidebar: 'community', hidden: true }),
   p('community.categories', '/server/:id/categories', { layout: 'channel', sidebar: 'community', hidden: true }),
   p('community.settings', '/server/:id/settings', { layout: 'channel', sidebar: 'community', hidden: true }),
+  // The onboarding a member is shown when they arrive. It is a place of its
+  // own, because a member is sent to it and may come back to it.
+  p('community.onboarding', '/server/:id/onboarding', { layout: 'channel', sidebar: 'community', hidden: true }),
+
+  // ---- the workspace. Five surfaces, each with its own address, so a reader
+  // can link to a document and a phone can open a board. The landing page
+  // chooses one of them.
+  p('community.workspace', '/server/:id/workspace', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
+  p('community.workspace.spaces', '/server/:id/workspace/spaces', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
+  p('community.workspace.space', '/server/:id/workspace/space/:space', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
+  p('community.workspace.documents', '/server/:id/workspace/documents', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
+  p('community.workspace.document', '/server/:id/workspace/document/:document', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
+  p('community.workspace.boards', '/server/:id/workspace/boards', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
+  p('community.workspace.board', '/server/:id/workspace/board/:board', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
+  p('community.workspace.card', '/server/:id/workspace/board/:board/card/:card', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
+  p('community.workspace.events', '/server/:id/workspace/events', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
+  p('community.workspace.event', '/server/:id/workspace/event/:event', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
+  p('community.workspace.polls', '/server/:id/workspace/polls', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
+  p('community.workspace.poll', '/server/:id/workspace/poll/:poll', {
+    layout: 'channel', sidebar: 'community', hidden: true,
+  }),
 
   // ---- account settings. /account/* is the older spelling.
   p('settings', '/settings', {
@@ -95,20 +176,32 @@ export const PAGES = [
     blurb: 'Which channels stay quiet, and what you are told about',
     tabs: ['notifications'],
   }),
+  p('settings.encryption', '/settings/encryption', {
+    layout: 'settings', scope: 'account', group: 'Safety', order: 4,
+    label: 'Encryption', icon: 'lock',
+    blurb: 'The devices this account reads and writes with, and the keys that hold them together',
+    tabs: ['encryption'],
+  }),
   p('settings.appearance', '/settings/appearance', {
     layout: 'settings', scope: 'account', group: 'Preferences', order: 1,
     label: 'Appearance', icon: 'image',
     blurb: 'Colours, how much you see at once, and animation',
     tabs: ['appearance'],
   }),
-  p('settings.backend', '/settings/backend', {
+  p('settings.language', '/settings/language', {
     layout: 'settings', scope: 'account', group: 'Preferences', order: 2,
+    label: 'Language', icon: 'globe',
+    blurb: 'The language this account reads in, and how dates are written',
+    tabs: ['language'],
+  }),
+  p('settings.backend', '/settings/backend', {
+    layout: 'settings', scope: 'account', group: 'Preferences', order: 3,
     label: 'Connection', icon: 'server',
     blurb: 'Which server this client talks to',
     tabs: ['backend'],
   }),
   p('settings.updates', '/settings/updates', {
-    layout: 'settings', scope: 'account', group: 'Preferences', order: 3,
+    layout: 'settings', scope: 'account', group: 'Preferences', order: 4,
     label: 'Updates', icon: 'sparkle',
     blurb: 'What this build is and what changed',
     tabs: ['updates'],
@@ -175,8 +268,13 @@ export const PAGES = [
     label: 'Database', icon: 'database', tabs: ['database'],
     blurb: 'Where this instance keeps its data, and how to move it',
   }),
-  p('admin.diagnostics', '/admin/diagnostics', {
+  p('admin.voice', '/admin/voice', {
     layout: 'admin', scope: 'admin', group: 'Instance', order: 7,
+    label: 'Voice and video', icon: 'mic', tabs: ['voice'],
+    blurb: 'The media provider this instance uses, and what it still needs',
+  }),
+  p('admin.diagnostics', '/admin/diagnostics', {
+    layout: 'admin', scope: 'admin', group: 'Instance', order: 8,
     label: 'Diagnostics', icon: 'activity', tabs: ['diagnostics'],
     blurb: 'What each subsystem of this instance is really doing',
   }),
@@ -184,6 +282,16 @@ export const PAGES = [
     layout: 'admin', scope: 'admin', group: 'Instance', order: 6,
     label: 'Continuum', icon: 'share', tabs: ['continuum'],
     blurb: 'Federation with compatible Trycord instances',
+  }),
+  p('admin.incidents', '/admin/incidents', {
+    layout: 'admin', scope: 'admin', group: 'Instance', order: 9,
+    label: 'Incidents', icon: 'alert', tabs: ['incidents'],
+    blurb: 'What has happened to this instance, and what is being done about it',
+  }),
+  p('admin.federation', '/admin/federation', {
+    layout: 'admin', scope: 'admin', group: 'Moderation', order: 7,
+    label: 'Federation reports', icon: 'flag', tabs: ['federation'],
+    blurb: 'Reports about activity on this instance, sent by other instances',
   }),
 
   // ---- community settings sections. No path: each is addressed relative to
@@ -197,6 +305,7 @@ export const PAGES = [
     ['roles', 'Roles', 'shield', 'What each role may manage'],
     ['invites', 'Invites', 'mail', 'Codes and their uses'],
     ['moderation', 'Moderation', 'flag', 'Reports and enforcement'],
+    ['voice', 'Voice and video', 'mic', 'The voice channels of this community'],
     ['ownership', 'Ownership', 'crown', 'Transfer or take over'],
     ['analytics', 'Analytics', 'chart', 'Activity, channels, members'],
     ['integrations', 'Integrations', 'rocket', 'Webhooks and apps'],
@@ -230,6 +339,7 @@ function groupForCommunitySetting(id) {
   if (id === 'channels' || id === 'categories') return 'Structure';
   if (id === 'members' || id === 'roles' || id === 'invites') return 'Access';
   if (id === 'moderation' || id === 'ownership') return 'Safety';
+  if (id === 'voice') return 'Structure';
   return 'Reach';
 }
 

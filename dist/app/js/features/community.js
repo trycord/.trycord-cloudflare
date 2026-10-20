@@ -12,16 +12,21 @@ import { icon } from '../../packages/icons.js';
 import Api from '../../packages/api.js';
 import { EVENTS, on, joinChannel, leaveChannel } from '../../packages/realtime.js';
 import {
-  State, nameOf, refreshServerTree, refreshServerMembers,
-  refreshServerRoles, refreshMutes, can, isOwner, serverById, channelById,
+  State, refreshServerTree, refreshServerRoles, can, isOwner, serverById, channelById,
 } from '../../packages/store.js';
 import { path, navigate } from '../../packages/nav.js';
-import { avatar, serverMark, channelIcon } from '../ui/primitives.js';
-import { head, card, row, blank, fault, fold, facts, hold } from '../ui/page.js';
+import { head, card, row, blank, fault, fold, hold } from '../ui/page.js';
 import { conversationSurface, asMessage, messageRow, copyText } from '../ui/chat.js';
+import * as encrypted from '../ui/encrypted.js';
+import { memberList } from '../ui/members.js';
+import {
+  openCategoryDialog, createChannel, renameCategory, deleteCategory,
+  categoryMenuItems, reorderCategories, orderAfterDrop, attachDragOrder,
+} from '../community/manage.js';
 import { communitySettingsSections } from './communitySettings.js';
+import { roleDot, roleColourField, memberRoleDot, roleChips } from '../../packages/roles.js';
 import { renderVoiceRoom } from '../voice/room.js';
-import { errorToast, toast, confirmDialog, openDialog, openMenu } from '../ui/overlays.js';
+import { errorToast, toast, openDialog } from '../ui/overlays.js';
 
 function renderSettingsSection(ctx, section) {
   const table = communitySettingsSections();
@@ -86,9 +91,53 @@ export function renderChannelView(ctx) {
               class: 'btn btn--ghost btn--sm',
               href: path('/server/' + serverId + '/channel/' + channelId + '/pins'),
             }, icon('pin', { size: 14 }), 'Pins')
-            : null),
+            : null,
+        // Whether this conversation is encrypted, and the way to make it so.
+        //
+        // The key is **not** published automatically. The server refuses text
+        // in a conversation it reports as encrypted, so a client that
+        // published a key for every conversation it opened would break the
+        // ordinary path for anybody whose encryption could not be set up. It is
+        // a decision the reader takes, and the button says what it does.
+        encryptionControl(serverId, channelId)),
     });
   };
+
+  // The encryption control for a conversation: the state, and the way to turn
+  // it on. Repaints the head when the state changes.
+  function encryptionControl(serverId, channelId) {
+    const holder = el('span', { class: 'pagehead-actions' });
+    const paint = () => {
+      const answer = encrypted.knownState(channelId);
+      const known = encrypted.isKnown(answer);
+      const mark = encrypted.badge(answer);
+      const label = mark.getAttribute('title') || 'Encryption';
+      const button = el('button', {
+        class: 'btn btn--ghost btn--sm',
+        type: 'button',
+        'aria-label': 'Encryption: ' + label,
+        title: known
+          ? label
+          : 'The server has not said yet whether this conversation is encrypted.',
+        onClick: async () => {
+          try {
+            await encrypted.turnOn(channelId);
+          } catch (error) {
+            errorToast(error);
+          }
+          paint();
+        },
+      }, icon('lock', { size: 14 }), label);
+      holder.replaceChildren(button);
+    };
+    paint();
+    // The state arrives from the server, so the control says so until it
+    // does rather than claiming "not encrypted" before it knows.
+    encrypted.conversationState(channelId)
+      .then(paint)
+      .catch(() => { /* the state is unknown, and the badge says that */ });
+    return holder;
+  }
 
   if (!channel) {
     return {
@@ -126,9 +175,31 @@ export function renderChannelView(ctx) {
     };
   }
 
+  // The panel beside a channel: who is here, and what this channel is. It is
+  // the same roster the members page draws, so a reader who has seen one knows
+  // the other.
+  const roster = memberList(serverId);
+  const inspector = {
+    kind: 'channel',
+    tabs: [
+      {
+        id: 'members', label: 'Members', icon: 'users',
+        render: () => roster.load().then(() => roster.node),
+      },
+      {
+        id: 'about', label: 'About', icon: 'info',
+        render: () => el('div', { class: 'inspector-note' },
+          el('p', {}, channel.topic || 'This channel has no topic.'),
+          el('p', {}, (channel.type || 'text') + ' channel in ' + server.name + '.')),
+      },
+    ],
+    dispose() { roster.cleanup(); },
+  };
+
   const surface = conversationSurface({
     kind: 'channel',
     scopeId: channelId,
+    serverId: serverId,
     composerLabel: 'Message #' + channel.name,
     composerHint: 'Message #' + channel.name,
     canManage: can(serverId, 'MANAGE_MESSAGES'),
@@ -136,16 +207,28 @@ export function renderChannelView(ctx) {
       const page = await Api.messages(channelId, { before: anchor, limit: 40 });
       return { messages: Array.isArray(page) ? page : (page && page.messages) || [] };
     },
-    send: (payload) => Api.sendMessage(channelId, payload),
+    send: (payload) => encrypted.send(channelId, payload, (body) => Api.sendMessage(channelId, body)),
     edit: (messageId, content) => Api.updateMessage(channelId, messageId, { content }),
     del: (messageId) => Api.deleteMessage(channelId, messageId),
     reactTo: (messageId, emoji) => Api.reactChannel(channelId, messageId, emoji),
     unreactFrom: (messageId, emoji) => Api.unreactChannel(channelId, messageId, emoji),
-    pin: (messageId, pinned) => pinned
-      ? Api.pinMessage(serverId, channelId, messageId)
-      : Api.unpinMessage(serverId, channelId, messageId),
+    pin: async (messageId, pinned) => {
+      const out = pinned
+        ? await Api.pinMessage(serverId, channelId, messageId)
+        : await Api.unpinMessage(serverId, channelId, messageId);
+      // The row is updated from the server's answer rather than from a
+      // realtime event: the gateway does not announce pins, so waiting for one
+      // would leave the row saying it is unpinned after it was pinned.
+      surface.api.pinned(messageId, pinned);
+      if (isPins) open();
+      return out;
+    },
     threadOf: (messageId) => Api.thread('channel', channelId, messageId),
-    upload: (file, onProgress) => Api.uploadAttachment(channelId, file, onProgress),
+    upload: (file, onProgress) => encrypted.upload(
+      channelId,
+      file,
+      (plainFile) => Api.uploadAttachment(channelId, plainFile, onProgress),
+    ).then((out) => { if (onProgress) onProgress(1); return out; }),
     copyHref: () => path('/server/' + serverId + '/channel/' + channelId),
     emptyHint: { title: 'This channel is quiet', text: 'The first message starts it.' },
   });
@@ -187,8 +270,14 @@ export function renderChannelView(ctx) {
     try {
       const page = await Api.messages(channelId, { limit: 50 });
       if (mine !== generation) return;
-      surface.api.paint((Array.isArray(page) ? page : (page && page.messages) || []).map(asMessage),
-        { hasOlder: (Array.isArray(page) ? page : page && page.messages || []).length >= 50 });
+      // The rows are opened before they are drawn. An encrypted row carries no
+      // text from the server - the server holds none - so it has to be opened
+      // here or it is drawn as an empty message.
+      const rows = await encrypted.readRows(
+        Array.isArray(page) ? page : (page && page.messages) || [], channelId);
+      if (mine !== generation) return;
+      surface.api.paint(rows.map(asMessage),
+        { hasOlder: rows.length >= 50 });
       surface.wireScroller();
       joinChannel(channelId);
     } catch (e) {
@@ -201,14 +290,25 @@ export function renderChannelView(ctx) {
     }
   };
 
+  // A pin event about another channel says nothing about this one. The event
+  // names its channel when it carries one; when it does not, the message id
+  // decides, because the surface only knows this channel's messages.
+  const isThisChannel = (event) => {
+    const id = event.channel_id || event.channelId || event.channel;
+    return !id || String(id) === String(channelId);
+  };
+
   const unsubs = [
-    on(EVENTS.MESSAGE, (event) => {
+    // The row is opened before it is shown. An encrypted message arrives as
+    // an envelope with no text, and the text is in the envelope - so a row
+    // that is drawn as it arrives is an empty bubble.
+    on(EVENTS.MESSAGE, async (event) => {
       if (String(event.channel_id || event.channelId) !== String(channelId)) return;
-      surface.api.created(event);
+      surface.api.created(await encrypted.readRow(event, channelId));
     }),
-    on(EVENTS.MESSAGE_UPDATED, (event) => {
+    on(EVENTS.MESSAGE_UPDATED, async (event) => {
       if (String(event.channel_id || event.channelId) !== String(channelId)) return;
-      surface.api.updated(event);
+      surface.api.updated(await encrypted.readRow(event, channelId));
     }),
     on(EVENTS.MESSAGE_DELETED, (event) => {
       if (String(event.channel_id || event.channelId) !== String(channelId)) return;
@@ -222,18 +322,28 @@ export function renderChannelView(ctx) {
       if (String(event.channel_id || event.channelId) !== String(channelId)) return;
       surface.api.embeds(event.messageId, event.embeds || []);
     }),
-    on(EVENTS.MESSAGE_PINNED, (event) => surface.api.pinned(event.id, true)),
-    on(EVENTS.MESSAGE_UNPINNED, (event) => surface.api.pinned(event.id, false)),
+    on(EVENTS.MESSAGE_PINNED, (event) => {
+      if (!isThisChannel(event)) return;
+      surface.api.pinned(event.id, true);
+      if (isPins) open();
+    }),
+    on(EVENTS.MESSAGE_UNPINNED, (event) => {
+      if (!isThisChannel(event)) return;
+      surface.api.pinned(event.id, false);
+      if (isPins) open();
+    }),
   ];
 
   return {
     node: isPins ? pinsPage : host,
+    inspector,
     onMount: open,
     cleanup() {
       generation += 1;
       for (const off of unsubs) off();
       if (!isPins) leaveChannel();
       surface.cleanup();
+      roster.cleanup();
     },
   };
 }
@@ -252,105 +362,24 @@ export function pinRow(m) {
 export function renderMembers(ctx) {
   const serverId = ctx.serverId;
   const server = serverById(serverId) || State.serverDetail.get(serverId) || { name: 'Community' };
-  const body = el('div', { class: 'rowlist' });
-
-  const paint = () => {
-    const page = State.serverMembers.get(serverId);
-    const items = (page && page.items) || [];
-    if (!items.length) {
-      body.replaceChildren(blank({
-        glyph: 'users',
-        title: 'No one else is here',
-        text: 'An invite is the way in - open the invites page to make one.',
-      }));
-      return;
-    }
-    body.replaceChildren(...items.map((member) => row({
-      lead: avatar(member, { size: 'sm', rounded: true, presence: 'offline' }),
-      title: member.nickname || nameOf(member),
-      sub: (member.roleNames && member.roleNames.join(', '))
-        || (member.isOwner || member.is_owner ? 'Community owner' : '@' + member.username),
-      href: path('/users/' + member.id + '?serverId=' + serverId),
-      link: true,
-      side: can(serverId, 'KICK_MEMBERS') || can(serverId, 'BAN_MEMBERS')
-        ? el('button', {
-          class: 'btn btn--ghost btn--sm', type: 'button',
-          'aria-label': 'Actions for ' + nameOf(member),
-          onClick: (event) => memberMenu(event, serverId, member, paint),
-        }, icon('more', { size: 15 }))
-        : null,
-    })));
-  };
+  const roster = memberList(serverId);
 
   return {
     node: fold([
       head({
         kicker: server.name,
         title: 'Members',
-        lede: 'Everyone here, newest joins last.',
+        lede: 'Everyone here, and who is about.',
         actions: can(serverId, 'MANAGE_ROLES')
           ? el('a', { class: 'btn btn--ghost btn--sm', href: path('/server/' + serverId + '/roles') },
             icon('shield', { size: 14 }), 'Roles')
           : null,
       }),
-      card({ label: 'Roster', glyph: 'users', body, flush: true }),
+      card({ label: 'Roster', glyph: 'users', body: roster.node, flush: true }),
     ]),
-    onMount: async () => {
-      if (!State.serverMembers.get(serverId)) paint();
-      try {
-        await refreshServerMembers(serverId);
-        paint();
-      } catch (e) {
-        body.replaceChildren(fold([fault(e, null)]));
-      }
-    },
-    cleanup() {},
+    onMount: () => roster.load(),
+    cleanup() { roster.cleanup(); },
   };
-}
-
-function memberMenu(event, serverId, member, paint) {
-  const items = [
-    { header: nameOf(member) || member.username },
-    {
-      label: 'Open profile', icon: 'user',
-      onSelect: () => navigate('/users/' + member.id + '?serverId=' + serverId),
-    },
-  ];
-  if (can(serverId, 'TIMEOUT_MEMBERS')) {
-    items.push({
-      label: 'Timeout for 10 minutes', icon: 'clock',
-      onSelect: () => Api.timeoutMember(serverId, member.id, 10).then(() => paint()).catch((e) => errorToast(e)),
-    });
-  }
-  if (can(serverId, 'KICK_MEMBERS')) {
-    items.push({
-      label: 'Remove from community', icon: 'logout', danger: true,
-      onSelect: () => confirmDialog({
-        title: 'Remove ' + (nameOf(member) || member.username) + '?',
-        body: 'They can come back if there is a place for them.',
-        confirmLabel: 'Remove',
-        danger: true,
-      }).then((yes) => {
-        if (!yes) return;
-        Api.kickMember(serverId, member.id).then(() => paint()).catch((e) => errorToast(e));
-      }),
-    });
-  }
-  if (can(serverId, 'BAN_MEMBERS') && !isOwner(serverId)) {
-    items.push({
-      label: 'Ban from community', icon: 'ban', danger: true,
-      onSelect: () => confirmDialog({
-        title: 'Ban ' + (nameOf(member) || member.username) + '?',
-        body: 'A ban keeps them out until it is lifted on purpose.',
-        confirmLabel: 'Ban',
-        danger: true,
-      }).then((yes) => {
-        if (!yes) return;
-        Api.banMember(serverId, member.id, '').then(() => paint()).catch((e) => errorToast(e));
-      }),
-    });
-  }
-  openMenu(event, items);
 }
 
 // -- roles, invites, categories ------------------------------------------------
@@ -372,7 +401,7 @@ export function renderRoles(ctx) {
       return;
     }
     body.replaceChildren(...roles.map((role) => row({
-      lead: el('span', { class: 'role-dot' }),
+      lead: roleDot(role),
       title: role.name,
       sub: role.permissions && role.permissions.length
         ? role.permissions.map((permission) => permission).slice(0, 3).join(', ')
@@ -497,7 +526,9 @@ export function renderCategories(ctx) {
 
   const read = () => {
     const tree = State.serverTree.get(serverId) || { categories: [], channels: [] };
-    if (!(tree.categories || []).length) {
+    const categories = (tree.categories || []).slice()
+      .sort((a, b) => (a.position || 0) - (b.position || 0));
+    if (!categories.length) {
       body.replaceChildren(blank({
         glyph: 'layers',
         title: 'No categories',
@@ -505,26 +536,41 @@ export function renderCategories(ctx) {
       }));
       return;
     }
-    body.replaceChildren(...(tree.categories || []).map((category) => {
+    body.replaceChildren(...categories.map((category) => {
       const count = (tree.channels || []).filter((channel) =>
         channel.category_id === category.id || channel.categoryId === category.id).length;
-      return row({
+      const node = row({
+        class: 'category-row',
+        link: true,
         lead: el('span', { class: 'role-dot' }, icon('layers', { size: 15 })),
         title: category.name,
         sub: count + ' channel' + (count === 1 ? '' : 's'),
+        menu: () => categoryMenuItems(serverId, category, {
+          canManageChannels: canManage,
+          onCreateChannel: () => createChannel(serverId, category.id),
+        }),
         side: canManage ? el('span', { class: 'rowtools' },
           el('button', {
             class: 'btn btn--ghost btn--sm', type: 'button',
             'aria-label': 'Rename the ' + category.name + ' category',
-            onClick: async () => {
-              try {
-                await Api.updateCategory(serverId, category.id, { name: category.name });
-                await refreshServerTree(serverId, { force: true });
-                read();
-              } catch (e) { errorToast(e); }
-            },
-          }, icon('edit', { size: 14 }))) : null,
+            onClick: (event) => { event.stopPropagation(); renameCategory(serverId, category); },
+          }, icon('edit', { size: 14 })),
+          el('button', {
+            class: 'btn btn--danger btn--sm', type: 'button',
+            'aria-label': 'Delete the ' + category.name + ' category',
+            onClick: (event) => { event.stopPropagation(); deleteCategory(serverId, category); },
+          }, 'Delete')) : null,
       });
+      if (canManage) {
+        attachDragOrder(node, {
+          id: category.id,
+          onDrop: (movedId, targetId) => {
+            const order = orderAfterDrop(categories, movedId, targetId);
+            if (order) reorderCategories(serverId, order);
+          },
+        });
+      }
+      return node;
     }));
   };
 
@@ -535,16 +581,10 @@ export function renderCategories(ctx) {
       head({
         kicker: server.name,
         title: 'Categories',
-        lede: 'The order of the column.',
+        lede: 'The order of the column. Drag a category onto another to move it.',
         actions: canManage ? el('button', {
           class: 'btn btn--default btn--sm', type: 'button',
-          onClick: async () => {
-            try {
-              await Api.createCategory(serverId, { name: 'New category' });
-              await refreshServerTree(serverId, { force: true });
-              read();
-            } catch (e) { errorToast(e); }
-          },
+          onClick: () => openCategoryDialog(serverId, { onDone: read }),
         }, icon('plus', { size: 14 }), 'New category') : null,
       }),
       card({ label: 'Categories', glyph: 'layers', body, flush: true }),
@@ -634,12 +674,21 @@ function roleEditor(serverId, role, refresh) {
     'aria-label': 'Role name',
     placeholder: 'A name the members will read',
   });
+  // The colour of the role. It is a display hint the community chooses, and
+  // it is saved with the role through the same call that saves the name.
+  const colour = roleColourField({ role });
   const save = async (event) => {
     event.preventDefault();
     if (!name.value.trim()) { name.focus(); return; }
+    const chosen = colour.read();
+    if (chosen === undefined) {
+      // The value in the field is not a colour. The field says so; the save
+      // does not go ahead with something the server would refuse.
+      return;
+    }
     try {
-      if (role) await Api.updateRole(serverId, role.id, { name: name.value.trim() });
-      else await Api.createRole(serverId, { name: name.value.trim() });
+      if (role) await Api.updateRole(serverId, role.id, { name: name.value.trim(), color: chosen });
+      else await Api.createRole(serverId, { name: name.value.trim(), color: chosen });
       close();
       await refreshServerRoles(serverId);
       refresh();
@@ -650,6 +699,7 @@ function roleEditor(serverId, role, refresh) {
     title: role ? 'Edit ' + role.name : 'New role',
     body: el('form', { onSubmit: save, class: 'fold' },
       name,
+      colour.node,
       el('button', { class: 'btn btn--primary btn--sm', type: 'submit' }, 'Save')),
   });
   name.focus();
