@@ -42,8 +42,13 @@ printed so a deploy can be traced back to a source revision.
 ## Deploying
 
 ```bash
-npx wrangler deploy
+./deploy.sh
 ```
+
+`deploy.sh` builds the tree, proves it with both verifiers, and only then
+publishes. `npx wrangler deploy` on its own publishes whatever is in
+`dist/` without checking it, which is how a tree with a broken import in it
+reached a deployment once.
 
 `dist/` is committed, so `wrangler deploy` alone is enough. Rebuild and commit
 `dist/` whenever the product source changes; nothing regenerates it implicitly.
