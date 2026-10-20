@@ -9,14 +9,7 @@ import { avatar, bannerNode } from '../ui/primitives.js';
 import { head, card, fault, fold } from '../ui/page.js';
 import { errorToast, toast } from '../ui/overlays.js';
 
-// The identity panel.
-//
-// `reload` is handed in: removing the avatar or the banner changes the
-// profile, and the panel has to show the profile as it now is. It used to
-// call a `reload` that was not in its scope - a function of the view below -
-// so removing your picture threw a ReferenceError after the picture was
-// already gone, and the reader was shown an error instead of their profile.
-function paint(identity, user, reload) {
+function paint(identity, user) {
   const name = el('input', {
     class: 'input', type: 'text', value: user.displayName || user.username || '',
     'aria-label': 'Display name',
@@ -31,9 +24,6 @@ function paint(identity, user, reload) {
     'aria-label': 'About you',
     placeholder: 'A few words for the people who open your profile',
   });
-  // The words the reader already wrote are shown, so saving the page does not
-  // quietly replace them with an empty box.
-  about.value = user.bio || '';
   let avatarFile = null;
   let bannerFile = null;
 
@@ -75,18 +65,7 @@ function paint(identity, user, reload) {
                   reload();
                 } catch (e) { errorToast(e); }
               },
-            }, 'Remove banner') : null,
-            user.avatarUrl ? el('button', {
-              class: 'btn btn--ghost btn--sm', type: 'button',
-              'aria-label': 'Remove the avatar',
-              onClick: async () => {
-                try {
-                  await Api.removeProfileImage('avatar');
-                  toast('Avatar removed');
-                  reload();
-                } catch (e) { errorToast(e); }
-              },
-            }, 'Remove avatar') : null)),
+            }, 'Remove banner') : null)),
         user.bannerUrl ? bannerNode(user.bannerUrl, 'settings-banner') : null,
         avatarPick, bannerPick,
       ]),
@@ -122,7 +101,7 @@ export function profileView() {
     try {
       const me = await Api.me();
       State.user = Object.assign({}, State.user || {}, me || {});
-      paint(identity, State.user || {}, reload);
+      paint(identity, State.user || {});
     } catch (e) {
       identity.replaceChildren(fold([fault(e, null)]));
     }

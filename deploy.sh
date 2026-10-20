@@ -35,6 +35,16 @@ export TRYCORD_REF="$REF"
 echo "==> building from $REF"
 node build.js
 
+# The tree the build produced is proved before anything is published.
+#
+# The build takes the tree away before it fetches, so a build that failed
+# leaves nothing to publish. This check says so out loud rather than letting
+# a deploy publish whatever is there.
+if [ ! -f "dist/index.html" ]; then
+  echo "the build produced no tree; nothing will be published" >&2
+  exit 1
+fi
+
 echo "==> verifying the tree"
 node verify-dist.js
 

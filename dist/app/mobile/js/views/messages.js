@@ -10,17 +10,13 @@ import { el, clear } from '../../../packages/dom.js';
 import { icon } from '../../../packages/icons.js';
 import { avatar } from '../components.js';
 import { State } from '../../../packages/store.js';
-import { menu, confirm, toast, sheet, attachLongPress } from '../ui.js';
-import { copyText } from '../clipboard.js';
-import { embedCard, imagesOf, kindOf } from '../embeds.js';
+import { menu, confirm, toast, sheet } from '../ui.js';
 import { mediaUrl } from '../../../packages/media.js';
-import { dayLabel, toDate, timeOfDay, fileSize } from '../../../packages/format.js';
+import { dayLabel, toDate, timeOfDay, fullTimestamp, fileSize } from '../../../packages/format.js';
 import realtime, { EVENTS } from '../../../packages/realtime.js';
 import { navigate, path } from '../../../packages/nav.js';
 import Api from '../../../packages/api.js';
 import { empty } from '../components.js';
-import { templateSheet, collectionSheet, expandInDraft } from '../saved.js';
-import * as encrypted from '../encrypted.js';
 
 const QUICK = ['\u{1F44D}', '\u{1F525}', '\u{1F389}', '\u{1F602}', '\u{1F440}', '\u{2705}'];
 
@@ -58,11 +54,6 @@ function normalizeMessage(raw) {
       reactions: raw.reactions || [],
       embeds: raw.embeds || [],
       pinned: !!raw.pinned,
-      // An encrypted message, and whether this device could open it. The
-      // server holds no text for an encrypted message, so a message that
-      // could not be opened has a reason and not an empty body.
-      encrypted: !!raw.encrypted,
-      unreadable: !!raw.unreadable,
     };
   }
   return {
@@ -80,8 +71,6 @@ function normalizeMessage(raw) {
     reactions: raw.reactions || [],
     embeds: raw.embeds || [],
     pinned: !!raw.pinned,
-    encrypted: !!raw.encrypted,
-    unreadable: !!raw.unreadable,
   };
 }
 
@@ -98,11 +87,7 @@ async function readPage(scope, options) {
   const rows = scope.kind === 'dm'
     ? await Api.dmMessages(scope.id, options)
     : await Api.messages(scope.id, options);
-  // The rows are opened before they are drawn: an encrypted row carries no
-  // text from the server, so it has to be opened here or it is drawn as an
-  // empty message.
-  const opened = await encrypted.readRows(Array.isArray(rows) ? rows : [], scope.id);
-  return opened.map(normalizeMessage).filter(Boolean).sort(bySeq);
+  return (Array.isArray(rows) ? rows : []).map(normalizeMessage).filter(Boolean).sort(bySeq);
 }
 
 function renderRich(container, text) {
@@ -126,57 +111,22 @@ function renderRich(container, text) {
 function attachmentNode(att) {
   const url = att.url || ('/api/attachments/' + att.id);
   const kind = String(att.content_type || att.contentType || '');
-  const name = att.filename || 'Attachment';
   if (kind.indexOf('image/') === 0) {
     const img = el('img', { class: 'm-attach__image', alt: att.filename || 'image', loading: 'lazy' });
     mediaUrl(url).then((src) => { if (src) img.src = src; }).catch(() => {});
-    const holder = el('div', { class: 'm-attach' }, img);
-    attachLongPress(holder, () => attachmentMenuItems(att, url, name), { title: name });
-    return holder;
+    return el('div', { class: 'm-attach' }, img);
   }
   if (kind.indexOf('video/') === 0 || kind.indexOf('audio/') === 0) {
     const tag = kind.indexOf('video/') === 0 ? 'video' : 'audio';
     const media = el(tag, { class: 'm-attach__media', controls: true, preload: 'metadata' });
     mediaUrl(url).then((src) => { if (src) media.src = src; }).catch(() => {});
-    const holder = el('div', { class: 'm-attach' }, media);
-    attachLongPress(holder, () => attachmentMenuItems(att, url, name), { title: name });
-    return holder;
+    return el('div', { class: 'm-attach' }, media);
   }
   const link = el('a', { class: 'm-attach m-attach--file', href: url, target: '_blank', rel: 'noopener noreferrer' },
     icon('file', { size: 18 }),
-    el('span', { class: 'm-attach__name truncate' }, name),
+    el('span', { class: 'm-attach__name truncate' }, att.filename || 'Attachment'),
     att.size ? el('span', { class: 'm-attach__size' }, fileSize(att.size)) : null);
-  attachLongPress(link, () => attachmentMenuItems(att, url, name), { title: name });
   return link;
-}
-
-// The menu a file offers. Every entry acts on the file.
-function attachmentMenuItems(att, url, name) {
-  const items = [];
-  if (url) {
-    items.push({
-      label: 'Open the file', icon: 'external',
-      onSelect: () => { window.open(url, '_blank', 'noopener,noreferrer'); },
-    });
-    items.push({ label: 'Copy the address', icon: 'link', onSelect: () => copyText(url, 'File address') });
-  }
-  items.push({ label: 'Copy the name', icon: 'copy', onSelect: () => copyText(name, 'File name') });
-  return items;
-}
-
-// The previews of one message. The images of the message are collected first
-// so the sheet can move between them.
-function embedRow(cards) {
-  const list = cards || [];
-  const images = imagesOf(list);
-  let seen = 0;
-  const holder = el('div', { class: 'm-embed-row' });
-  for (const card of list) {
-    let index = 0;
-    if (kindOf(card) === 'image') { index = seen; seen += 1; }
-    holder.appendChild(embedCard(card, { images, index, onCopy: copyText }));
-  }
-  return holder;
 }
 
 function reactionRow(message, handlers) {
@@ -212,19 +162,15 @@ function messageRow(message, previous, handlers) {
   }
   if (message.content) {
     const body = el('div', { class: 'm-msg__text' });
-    if (message.unreadable) {
-      // A message this device could not open. It is not an error in the
-      // message and it is not empty: the text is in the envelope, and this
-      // device does not have the key.
-      body.appendChild(el('p', { class: 'm-unreadable' },
-        message.content || 'This message could not be opened on this device.'));
-    } else {
-      renderRich(body, message.content);
-    }
+    renderRich(body, message.content);
     main.appendChild(body);
   }
   for (const att of message.attachments || []) main.appendChild(attachmentNode(att));
-  if ((message.embeds || []).length) main.appendChild(embedRow(message.embeds));
+  for (const card of message.embeds || []) {
+    main.appendChild(el('a', { class: 'm-embed', href: card.url || '#', target: '_blank', rel: 'noopener noreferrer' },
+      el('div', { class: 'm-embed__title truncate' }, card.title || card.url || 'Link'),
+      card.description ? el('div', { class: 'm-embed__text' }, card.description) : null));
+  }
   if ((message.reactions || []).length) main.appendChild(reactionRow(message, handlers));
   if (message.editedAt) main.appendChild(el('span', { class: 'm-msg__edited' }, 'edited'));
   if (message.replyCount) {
@@ -258,25 +204,11 @@ function createComposer(scope, submit) {
     replyBar, staged, fileInput, input,
     el('div', { class: 'm-composer__bar' },
       el('button', { class: 'm-iconbtn', type: 'button', title: 'Attach a file', 'aria-label': 'Attach a file', onClick: () => fileInput.click() }, icon('paperclip', { size: 20 })),
-      el('button', { class: 'm-iconbtn', type: 'button', title: 'Insert a template', 'aria-label': 'Insert a template', onClick: () => openTemplates() }, icon('zap', { size: 20 })),
       el('span', { class: 'm-spacer' }),
       el('button', { class: 'm-composer__send', type: 'submit', 'aria-label': 'Send' }, icon('send', { size: 20 }))));
 
   const files = [];
   let replyTo = null;
-  let expanding = false;
-
-  // The template picker: the reader's own templates, and the way one of them
-  // is put into the draft.
-  function openTemplates() {
-    templateSheet((entry) => {
-      const body = String((entry && entry.body) || '');
-      const at = input.selectionStart === null ? input.value.length : input.selectionStart;
-      input.value = input.value.slice(0, at) + body + input.value.slice(at);
-      input.setSelectionRange(at + body.length, at + body.length);
-      input.focus();
-    });
-  }
 
   function updateStaged() {
     clear(staged);
@@ -296,16 +228,6 @@ function createComposer(scope, submit) {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 140) + 'px';
     if (scope.onTyping) scope.onTyping();
-    // A shortcut is expanded when the reader has finished the word. The
-    // templates are read once, so this costs nothing per keystroke.
-    if (expanding) return;
-    expanding = true;
-    expandInDraft(input.value).then((expanded) => {
-      if (!expanded) return;
-      input.value = expanded.text;
-      input.setSelectionRange(input.value.length, input.value.length);
-    }).catch(() => { /* a template that cannot be read is not expanded */ })
-      .finally(() => { expanding = false; });
   });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
@@ -525,6 +447,18 @@ export function renderConversation(ctx, scope) {
     }
   }
 
+  function copyText(value) {
+    const text = String(value || '');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => {});
+    else {
+      const area = el('textarea', { class: 'visually-hidden' }, text);
+      document.body.appendChild(area);
+      area.select();
+      try { document.execCommand('copy'); } catch { /* nothing to do */ }
+      area.remove();
+    }
+  }
+
   function linkTo(message) {
     const route = isDm ? '/dms/' + scope.id : '/server/' + scope.serverId + '/channel/' + scope.id;
     return window.location.origin + path(route) + '#m-' + message.id;
@@ -567,9 +501,6 @@ export function renderConversation(ctx, scope) {
       if (!isDm && scope.serverId) {
         items.push({ separator: true });
         items.push({ label: message.pinned ? 'Unpin' : 'Pin', icon: 'pin', onSelect: () => togglePin(message) });
-        // A collection belongs to a community, so a message can only be saved
-        // into one when the conversation is in one.
-        items.push({ label: 'Save to a collection', icon: 'folder', onSelect: () => collectionSheet(scope.serverId, { itemType: 'message', itemId: message.id }) });
       }
       if (mine) {
         items.push({ separator: true });
@@ -588,22 +519,15 @@ export function renderConversation(ctx, scope) {
   }, async (draft) => {
     const ids = [];
     for (const file of draft.files) {
-      const out = await encrypted.upload(scope.id, file, (plainFile) => {
-        const upload = isDm
-          ? Api.uploadDmAttachment(scope.id, plainFile)
-          : Api.uploadAttachment(scope.id, plainFile);
-        return upload.promise;
-      });
+      const upload = isDm ? Api.uploadDmAttachment(scope.id, file) : Api.uploadAttachment(scope.id, file);
+      const out = await upload.promise;
       const attachment = out && out.attachment ? out.attachment : out;
       if (attachment && attachment.id) ids.push(attachment.id);
     }
     const body = { content: draft.content };
     if (ids.length) body.attachmentIds = ids;
     if (draft.replyTo) body.replyToId = draft.replyTo.id;
-    const post = isDm
-      ? (b) => Api.sendDm(scope.id, b)
-      : (b) => Api.sendMessage(scope.id, b);
-    const sent = await encrypted.send(scope.id, body, post);
+    const sent = isDm ? await Api.sendDm(scope.id, body) : await Api.sendMessage(scope.id, body);
     if (sent && sent.id) upsert(normalizeMessage(sent));
   });
 
@@ -612,17 +536,13 @@ export function renderConversation(ctx, scope) {
   function subscribe() {
     offs.push(realtime.on('open', catchUp));
     if (isDm) {
-      offs.push(realtime.on(EVENTS.DM_MESSAGE, async (frame) => {
+      offs.push(realtime.on(EVENTS.DM_MESSAGE, (frame) => {
         if (String(frame.conversationId) !== String(scope.id)) return;
-        const opened = await encrypted.readRow(
-          Object.assign({}, frame, { conversationId: scope.id }), scope.id);
-        upsert(normalizeMessage(opened));
+        upsert(normalizeMessage(Object.assign({}, frame, { conversationId: scope.id })));
       }));
-      offs.push(realtime.on(EVENTS.DM_MESSAGE_UPDATED, async (frame) => {
+      offs.push(realtime.on(EVENTS.DM_MESSAGE_UPDATED, (frame) => {
         if (String(frame.conversationId) !== String(scope.id)) return;
-        const opened = await encrypted.readRow(
-          Object.assign({}, frame, { conversationId: scope.id }), scope.id);
-        upsert(normalizeMessage(opened));
+        upsert(normalizeMessage(Object.assign({}, frame, { conversationId: scope.id })));
       }));
       offs.push(realtime.on(EVENTS.DM_MESSAGE_DELETED, (frame) => { if (String(frame.conversationId) === String(scope.id)) remove(frame.id); }));
       offs.push(realtime.on(EVENTS.DM_MESSAGE_EMBEDS, (frame) => {
@@ -632,15 +552,14 @@ export function renderConversation(ctx, scope) {
       }));
       return;
     }
-    offs.push(realtime.on(EVENTS.MESSAGE, async (frame) => {
+    offs.push(realtime.on(EVENTS.MESSAGE, (frame) => {
       if (String(frame.channel_id) !== String(scope.id)) return;
-      upsert(normalizeMessage(await encrypted.readRow(frame, scope.id)));
+      upsert(normalizeMessage(frame));
     }));
-    offs.push(realtime.on(EVENTS.MESSAGE_UPDATED, async (frame) => {
+    offs.push(realtime.on(EVENTS.MESSAGE_UPDATED, (frame) => {
       if (String(frame.channel_id) !== String(scope.id)) return;
-      const opened = await encrypted.readRow(frame, scope.id);
-      const known = find(opened.id);
-      if (known) upsert(Object.assign({}, known, normalizeMessage(opened)));
+      const known = find(frame.id);
+      if (known) upsert(Object.assign({}, known, frame));
     }));
     offs.push(realtime.on(EVENTS.MESSAGE_DELETED, (frame) => { if (String(frame.channel_id) === String(scope.id)) remove(frame.id); }));
     offs.push(realtime.on(EVENTS.MESSAGE_REACTION, (frame) => {

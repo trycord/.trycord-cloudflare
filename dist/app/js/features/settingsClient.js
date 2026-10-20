@@ -9,12 +9,11 @@
 
 import { el } from '../../packages/dom.js';
 import Api from '../../packages/api.js';
-import theme, { THEMES, CUSTOM_TOKEN_DEFS, DEFAULT_CUSTOM_TOKENS } from '../../packages/theme.js';
-import { readPrefs, patchPrefs, applyDensity, rememberRegions, rememberStageWidth, DENSITIES, REGIONS, STAGE_MIN, STAGE_MAX } from '../prefs.js';
+import theme, { THEMES, CUSTOM_TOKEN_DEFS, DEFAULT_CUSTOM_TOKENS, DEFAULT_THEME } from '../../packages/theme.js';
+import { readPrefs, patchPrefs, applyDensity, DENSITIES } from '../prefs.js';
 import { switchControl, fieldRow } from '../ui/primitives.js';
 import { head, card, blank, fault, fold, facts } from '../ui/page.js';
-import { toast } from '../ui/overlays.js';
-import { themePackages } from './settingsThemes.js';
+import { errorToast, toast } from '../ui/overlays.js';
 
 // A colour choice names a theme the stylesheet actually knows, and its swatch
 // carries the target theme as an attribute so the preview shows that theme's
@@ -103,56 +102,9 @@ function densityControls() {
     }, name.charAt(0).toUpperCase() + name.slice(1))));
 }
 
-// The arrangement: which regions of the workspace are shown. Each one is a
-// switch, and the choice is remembered for this account.
-const REGION_LABEL = {
-  rail: ['Communities rail', 'The strip of communities down the left.'],
-  column: ['Place column', 'The navigation beside the page: the places you can go.'],
-  inspector: ['Side panel', 'The panel that opens beside the page, with the roster in it.'],
-};
-
-function regionControls() {
-  const prefs = readPrefs();
-  return el('div', { class: 'layout-regions' },
-    REGIONS.map((region) => {
-      const [label, description] = REGION_LABEL[region];
-      const control = switchControl(prefs.regions[region] !== false, (on) => {
-        const next = Object.assign({}, readPrefs().regions, { [region]: on });
-        rememberRegions(next);
-      }, label);
-      return fieldRow(label, description, control);
-    }));
-}
-
-// The reading column's width. The grip in the workspace does the same thing
-// with the pointer; this is the same number, written down.
-function stageWidthControl() {
-  const prefs = readPrefs();
-  const value = el('span', { class: 'layout-value' }, prefs.stageWidth + ' px');
-  const slider = el('input', {
-    class: 'layout-width', type: 'range',
-    min: String(STAGE_MIN), max: String(STAGE_MAX), step: '20',
-    value: String(prefs.stageWidth),
-    'aria-label': 'The width of the reading column',
-  });
-  slider.addEventListener('input', () => {
-    value.textContent = slider.value + ' px';
-    rememberStageWidth(Number(slider.value));
-  });
-  return el('div', { class: 'layout-widths' }, slider, value);
-}
-
-// The motion the reader asked for, as it is stored: the choice wins over what
-// the system asks for, because the reader made it on purpose.
-function storedMotion() {
-  try { return localStorage.getItem('trycord-motion') || ''; } catch { return ''; }
-}
-
 export function appearanceView() {
-  const stored = storedMotion();
-  const asked = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)').matches : false;
   const reduce = switchControl(
-    stored ? stored === 'reduced' : asked,
+    window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)').matches : false,
     async (on) => {
       document.documentElement.dataset.motion = on ? 'reduced' : '';
       try { localStorage.setItem('trycord-motion', on ? 'reduced' : ''); } catch { /* session only */ }
@@ -166,10 +118,6 @@ export function appearanceView() {
   const currentId = (() => {
     try { return localStorage.getItem('trycord.theme') || 'trycord'; } catch { return 'trycord'; }
   })();
-
-  // The theme packages this instance runs. They are their own surface, because
-  // importing one is an act with a consequence and not another colour button.
-  const packages = themePackages();
 
   return {
     node: fold([
@@ -196,25 +144,12 @@ export function appearanceView() {
           densityControls())],
       }),
       card({
-        label: 'Arrangement', glyph: 'sidebar',
-        rows: [el('div', {},
-          el('p', { class: 'card-note' }, 'Which parts of the workspace are shown.'),
-          regionControls())],
-      }),
-      card({
-        label: 'Reading column', glyph: 'monitor',
-        rows: [el('div', {},
-          el('p', { class: 'card-note' }, 'How wide the conversation is. The grip on the stage does the same.'),
-          stageWidthControl())],
-      }),
-      card({
         label: 'Motion', glyph: 'wind',
         rows: [fieldRow('Less motion', 'Backgrounds stop drifting; nothing slides in.', reduce)],
       }),
-      packages.node,
     ]),
-    onMount: packages.onMount,
-    cleanup: packages.cleanup,
+    onMount: null,
+    cleanup() {},
   };
 }
 
@@ -270,21 +205,17 @@ export function updatesView() {
     ]),
     onMount: async () => {
       try {
-        // The build this client talks to is the one the server reports: the
-        // number is read from the instance, never written into this file.
         const instance = await Api.instance();
         const built = instance && (instance.version || instance.build);
         body.replaceChildren(fold([
           facts([
             { value: built || 'unknown', label: 'version' },
-            { value: (instance && instance.apiVersion) || 'unknown', label: 'api' },
-            { value: (instance && instance.protocolVersion) || 'unknown', label: 'protocol' },
-            { value: (instance && instance.name) || 'this instance', label: 'instance' },
+            { value: instance && instance.legacy ? 'legacy mode' : 'current', label: 'mode' },
           ]),
           blank({
             glyph: 'refresh',
-            title: 'A reload keeps the session',
-            text: 'Reloading picks up whatever shipped since this tab was opened; the session and the settings stay.',
+            title: 'The client is current',
+            text: 'A reload keeps the session and picks up whatever shipped since you opened this tab.',
           }),
         ]));
       } catch (e) {

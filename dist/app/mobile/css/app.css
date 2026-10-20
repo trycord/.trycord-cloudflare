@@ -56,16 +56,10 @@
   --rail-w: 68px;
   --context-w: 276px;
   --inspector-w: 336px;
-  --stage-w: 1180px;
   --cmdbar-h: 52px;
   --head-h: 54px;
   --composer-max: 300px;
   --content-max: 1040px;
-  /* A working surface is not a reading column. A studio - the workspace, the
-     settings console, anything with two panes side by side - uses the width
-     it is given, up to a point: a workspace squeezed into the width of an
-     article is a workspace nobody can work in. */
-  --workspace-max: 1760px;
 
   /* The readable floor. */
   --text-xs: 0.75rem;
@@ -133,8 +127,7 @@
 
 /* Density. The attribute lives on <html> and is written by js/prefs.js; the
  * default block is cozy, and the two other arrangements change measurements
- * rather than type, so a row is still a row. The rail's width is part of the
- * arrangement: a dense workspace gives the communities less room. */
+ * rather than type, so a row is still a row. */
 :root,
 :root[data-density="cozy"] {
   --row-h: 44px;
@@ -143,7 +136,6 @@
   --msg-gap: 15px;
   --panel-pad: 16px;
   --section-gap: 24px;
-  --rail-w: 68px;
 }
 :root[data-density="compact"] {
   --row-h: 36px;
@@ -152,7 +144,6 @@
   --msg-gap: 10px;
   --panel-pad: 12px;
   --section-gap: 18px;
-  --rail-w: 54px;
 }
 :root[data-density="comfortable"] {
   --row-h: 52px;
@@ -161,7 +152,6 @@
   --msg-gap: 20px;
   --panel-pad: 20px;
   --section-gap: 32px;
-  --rail-w: 82px;
 }
 
 /* Ember - the default dark palette. Charcoal from the canonical library, the
@@ -986,7 +976,6 @@ textarea.m-input { min-height: 96px; resize: vertical; }
   flex-wrap: wrap;
 }
 .m-msg__author { font-weight: var(--weight-strong); color: var(--text-1); font-size: var(--fs-sm); }
-.m-msg__time { font-size: var(--fs-micro); color: var(--text-3); }
 .m-msg__stamp { font-size: var(--fs-micro); color: var(--text-3); }
 .m-msg__text {
   font-size: var(--fs-body);
@@ -1574,14 +1563,6 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 
 /* Recovery codes and any other single-strength token the reader copies. */
 .m-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
-/* A message this device could not open. It is not an error in the message and
-   it is not empty: the text is in the envelope, and this device does not have
-   the key. */
-.m-unreadable {
-  font-size: var(--text-sm);
-  color: var(--text-3);
-  font-style: italic;
-}
 .m-code {
   padding: 8px 10px;
   border: 1px solid var(--line);
@@ -1656,108 +1637,16 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 }
 .m-mark.m-mark--sm { width: 28px; height: 28px; font-size: var(--fs-meta); border-radius: var(--tc-radius-sm); }
 
-/* -- link previews -----------------------------------------------------------
- * A preview is a card: a picture or a player when the page had one, and the
- * page's own words when it did not. The site is named by a tile of its first
- * letter rather than by a favicon - a favicon is a request to an arbitrary
- * host on behalf of every reader who opens the channel. */
+/* An embed: a link the message carries, drawn as its own panel. */
 .m-embed {
   margin: 4px 0;
   padding: 10px 12px;
   border-left: 2px solid var(--m-brand-line);
   background: var(--panel-2);
   border-radius: 0 var(--tc-radius-md) var(--tc-radius-md) 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.m-embed--plain {
-  display: block;
-  padding: 6px 0;
-  background: none;
-  border-left: 0;
-  color: var(--m-brand);
-  font-size: var(--fs-sm);
-  overflow-wrap: anywhere;
-}
-.m-embed__body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.m-embed__site { display: flex; align-items: center; gap: 7px; color: var(--text-3); font-size: var(--fs-micro); }
-.m-embed__tile {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  flex: none;
-  border-radius: var(--tc-radius-sm);
-  background: var(--panel-3);
-  color: var(--text-2);
-  font-size: var(--fs-micro);
-  font-weight: 700;
-  text-transform: uppercase;
 }
 .m-embed__title { font-size: var(--fs-body); font-weight: var(--weight-medium); color: var(--text-1); }
 .m-embed__text { font-size: var(--fs-sm); color: var(--text-2); margin-top: 2px; }
-.m-embed__host { font-size: var(--fs-micro); color: var(--text-3); }
-.m-embed__original { align-self: flex-start; font-size: var(--fs-micro); color: var(--m-brand); }
-.m-embed__media {
-  display: block;
-  padding: 0;
-  border: 0;
-  background: none;
-  border-radius: var(--tc-radius-md);
-  overflow: hidden;
-}
-.m-embed__image { display: block; max-width: 100%; max-height: 300px; object-fit: contain; }
-.m-embed__video {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border-radius: var(--tc-radius-md);
-  background: var(--panel-3);
-}
-.m-embed-row { display: flex; flex-direction: column; gap: 6px; }
-
-/* The image opened from a message, read large in a sheet. */
-.m-lightbox { display: flex; flex-direction: column; gap: 8px; }
-.m-lightbox__image {
-  display: block;
-  width: 100%;
-  max-height: 60vh;
-  object-fit: contain;
-  border-radius: var(--tc-radius-md);
-  background: var(--panel-3);
-}
-.m-lightbox__bar { display: flex; align-items: center; gap: 10px; }
-.m-lightbox__caption {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  color: var(--text-2);
-  font-size: var(--fs-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.m-lightbox__count { color: var(--text-3); font-size: var(--fs-micro); }
-.m-lightbox__nav { display: flex; gap: 6px; }
-
-/* -- a person ---------------------------------------------------------------- */
-.m-person { display: flex; flex-direction: column; gap: 2px; padding-bottom: 10px; }
-.m-person__name { font-size: var(--fs-lg); font-weight: var(--weight-strong); color: var(--text-1); }
-.m-person__handle { font-size: var(--fs-sm); color: var(--text-3); }
-.m-person__status { font-size: var(--fs-sm); color: var(--text-2); }
-
-/* -- the roster ---------------------------------------------------------------
- * The presence is written twice - as the dot on the face and as the word
- * beside the name - because a dot is a colour and a colour is not a sentence
- * for a reader who cannot see it. */
-.m-member-presence { font-size: var(--fs-micro); color: var(--text-3); }
-.m-member-presence[data-presence="online"] { color: var(--m-success); }
-.m-member-presence[data-presence="idle"] { color: var(--m-warning); }
-.m-member-presence[data-presence="dnd"] { color: var(--m-danger); }
-.m-row--member { min-height: 56px; }
-.m-row--channel, .m-row--category { min-height: 52px; }
-.m-input--search { margin-bottom: 8px; }
 
 /* ---- attachments and media ------------------------------------------------ */
 
@@ -1919,81 +1808,3 @@ textarea.m-input { min-height: 96px; resize: vertical; }
 .m-row[role="radio"] { cursor: pointer; }
 .m-row.is-current { background: var(--m-selected); }
 .m-row.is-current .m-row__title { color: var(--m-brand); }
-
-/* -- accepting the documents ------------------------------------------------- */
-/* The acceptance control on the registration form. */
-
-.m-auth__legal { align-items: flex-start; font-size: var(--fs-sm); color: var(--text-1); line-height: 1.5; }
-.m-auth__legal a { color: var(--m-brand); text-decoration: underline; }
-.m-auth__legal-version { color: var(--text-3); font-size: var(--fs-micro); }
-/* The acceptance is a block of its own, above the fields: on a phone the
-   bottom of a form is below the fold, and this is the one control on it a
-   reader cannot do without. */
-.m-auth__legal-block {
-  display: flex; flex-direction: column; gap: 8px;
-  margin: 0 0 var(--space-4, 16px); padding: 12px 14px;
-  border: 1px solid var(--m-line, var(--line-2)); border-radius: 12px;
-  background: var(--m-panel-2, var(--panel-2));
-}
-.m-auth__legal-block.is-accepted { border-color: var(--m-success, var(--success)); }
-.m-auth__legal-title { display: block; font-weight: 600; }
-.m-auth__legal-meta { display: block; margin-top: 2px; color: var(--text-3); font-size: var(--fs-micro); }
-.m-auth__legal-state { font-weight: 600; }
-.m-auth__legal-block.is-accepted .m-auth__legal-state { color: var(--m-success, var(--success)); }
-/* The reason the button is closed. */
-.m-auth__submit-note { margin: 8px 0 0; font-size: var(--fs-micro); color: var(--text-3); text-align: center; }
-
-/* ---- search filters, the incident timeline and the report disclosure ------- */
-
-/* The filter bar on a phone: the chips that are in force, and the button that
- * opens the sheet where a new one is written. */
-.m-filter-bar {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-}
-.m-filter-chips { display: flex; gap: 6px; flex-wrap: wrap; }
-.m-filter-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 4px 6px 4px 10px; border-radius: var(--tc-radius-pill);
-  background: var(--m-brand-soft); border: 1px solid var(--m-brand-line);
-  color: var(--m-brand); font-size: var(--fs-micro);
-}
-.m-filter-chip-text { font-family: var(--tc-font-mono); }
-.m-filter-chip-remove {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; padding: 0;
-  border: 0; border-radius: 50%;
-  background: transparent; color: inherit; cursor: pointer;
-}
-.m-filter-chip-remove:focus-visible { outline: 2px solid var(--tc-brand-focus); outline-offset: 1px; }
-
-/* The incident timeline: what an operator wrote, and nothing else. */
-.m-incident {
-  display: grid; gap: 4px;
-  padding: 14px; border: 1px solid var(--line);
-  border-left: 3px solid var(--m-brand-line);
-  border-radius: var(--tc-radius-md); background: var(--panel-2);
-}
-.m-incident__head {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-}
-.m-incident__status {
-  padding: 2px 9px; border-radius: var(--tc-radius-pill);
-  background: var(--panel-3); color: var(--text-2);
-  font-size: var(--fs-micro); font-weight: var(--weight-strong);
-}
-.m-incident__time { color: var(--text-3); font-size: var(--fs-micro); }
-.m-incident__title { font-weight: var(--weight-strong); color: var(--text-1); }
-.m-incident__summary { margin: 0; color: var(--text-2); line-height: 1.6; }
-.m-incident__body { margin: 0; color: var(--text-3); line-height: 1.6; }
-
-/* What a cross-instance report carries, in the server's own words. */
-.m-disclosure {
-  display: grid; gap: 6px;
-  padding: 12px; border: 1px solid var(--line-2);
-  border-radius: var(--tc-radius-md); background: var(--panel-2);
-}
-.m-disclosure__title { font-weight: var(--weight-strong); color: var(--text-1); font-size: var(--fs-sm); }
-.m-disclosure__list {
-  margin: 0; padding-left: 18px; color: var(--text-2);
-  font-size: var(--fs-sm); line-height: 1.6;
-}

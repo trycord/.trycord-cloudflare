@@ -10,14 +10,12 @@ import { icon } from '../../packages/icons.js';
 import Api from '../../packages/api.js';
 import { EVENTS, on, joinDm, leaveDm } from '../../packages/realtime.js';
 import {
-  State, emit, nameOf, dmPeer, refreshDms, presenceOf, on as onStore,
+  State, emit, nameOf, dmPeer, refreshDms, presenceOf,
 } from '../../packages/store.js';
 import { path, navigate } from '../../packages/nav.js';
 import { avatar } from '../ui/primitives.js';
 import { head, card, row, blank, fault, fold, stamp } from '../ui/page.js';
 import { conversationSurface, asMessage } from '../ui/chat.js';
-import * as encrypted from '../ui/encrypted.js';
-import { personSheetEntries } from '../ui/person.js';
 
 // -- the list -----------------------------------------------------------------
 
@@ -75,9 +73,6 @@ export function renderDms() {
         href: path('/dms/' + dm.id),
         link: true,
         meta: pair,
-        // A conversation is one of the things a person can be asked for, so the
-        // row carries that person's menu on a right-click.
-        menu: peer ? () => personSheetEntries(peer) : null,
       });
     }));
   };
@@ -88,9 +83,6 @@ export function renderDms() {
     // follows only replaces them when it returns something different.
     refreshDms().then(() => paint()).catch(() => {});
   }
-
-  // A conversation read elsewhere clears its badge without a reload.
-  const offDms = onStore('dms', paint);
 
   return {
     node: fold([
@@ -118,7 +110,7 @@ export function renderDms() {
         body.replaceChildren(fold([fault(e, null)]));
       }
     },
-    cleanup() { offDms(); },
+    cleanup() {},
   };
 }
 
@@ -147,14 +139,10 @@ export function renderDmConversation(ctx) {
       const page = await Api.dmMessages(conversationId, { before: anchor, limit: 40 });
       return { messages: Array.isArray(page) ? page : (page && page.messages) || [] };
     },
-    send: (payload) => encrypted.send(conversationId, payload, (body) => Api.sendDm(conversationId, body)),
+    send: (payload) => Api.sendDm(conversationId, payload),
     // The backend has always accepted an attachment on a direct message; the
     // composer simply never offered one.
-    upload: (file, onProgress) => encrypted.upload(
-      conversationId,
-      file,
-      (plainFile) => Api.uploadDmAttachment(conversationId, plainFile, onProgress),
-    ).then((out) => { if (onProgress) onProgress(1); return out; }),
+    upload: (file, onProgress) => Api.uploadDmAttachment(conversationId, file, onProgress),
     edit: (messageId, content) => Api.updateDm(conversationId, messageId, { content }),
     del: (messageId) => Api.deleteDm(conversationId, messageId),
     reactTo: (messageId, emoji) => Api.reactDm(conversationId, messageId, emoji),
@@ -228,13 +216,8 @@ export function renderDmConversation(ctx) {
       if (mine !== openGeneration) return;
       if (!host.querySelector('.convo-page')) host.replaceChildren(buildStructure());
       paintPeer(dm);
-      // The rows are opened before they are drawn: an encrypted row carries no
-      // text from the server, so it has to be opened here or it is drawn as an
-      // empty message.
-      const rows = await encrypted.readRows(dm.messages || [], conversationId);
-      if (mine !== openGeneration) return;
-      surface.api.paint(rows.map(asMessage),
-        { hasOlder: rows.length >= 50 });
+      surface.api.paint((dm.messages || []).map(asMessage),
+        { hasOlder: (dm.messages || []).length >= 50 });
       surface.wireScroller();
       joinDm(conversationId);
       markRead();
@@ -245,16 +228,13 @@ export function renderDmConversation(ctx) {
   };
 
   const unsubs = [
-    // The row is opened before it is shown. An encrypted message arrives as
-    // an envelope with no text, and the text is in the envelope - so a row
-    // that is drawn as it arrives is an empty bubble.
-    on(EVENTS.DM_MESSAGE, async (event) => {
+    on(EVENTS.DM_MESSAGE, (event) => {
       if (String(event.conversationId) !== String(conversationId)) return;
-      surface.api.created(await encrypted.readRow(event, conversationId));
+      surface.api.created(event);
     }),
-    on(EVENTS.DM_MESSAGE_UPDATED, async (event) => {
+    on(EVENTS.DM_MESSAGE_UPDATED, (event) => {
       if (String(event.conversationId) !== String(conversationId)) return;
-      surface.api.updated(await encrypted.readRow(event, conversationId));
+      surface.api.updated(event);
     }),
     on(EVENTS.DM_MESSAGE_EMBEDS, (event) => {
       if (String(event.conversationId) !== String(conversationId)) return;

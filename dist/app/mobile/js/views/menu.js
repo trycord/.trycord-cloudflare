@@ -13,19 +13,13 @@ import { path, navigate, BASE } from '../../../packages/nav.js';
 import { setOverride, siblingMount } from '../../../packages/chooser.js';
 import Api from '../../../packages/api.js';
 import { screen, section } from './util.js';
-import { attachLongPress } from '../ui.js';
-import { channelActions } from '../manage.js';
 
 const GLOBAL = [
   { route: '/home', label: 'Home', icon: 'home' },
   { route: '/dms', label: 'Direct messages', icon: 'message' },
   { route: '/friends', label: 'Friends', icon: 'users' },
   { route: '/notifications', label: 'Notifications', icon: 'bell' },
-  { route: '/search', label: 'Search', icon: 'search' },
-  { route: '/collections', label: 'Collections', icon: 'folder' },
-  { route: '/federation', label: 'Federation reports', icon: 'share' },
   { route: '/discover', label: 'Discover', icon: 'compass' },
-  { route: '/status', label: 'Service status', icon: 'activity' },
 ];
 
 function channelIcon(channel) {
@@ -96,12 +90,9 @@ export function renderMenu() {
     const list = el('div', { class: 'm-list' });
     if (sorted.length) {
       for (const channel of sorted) {
-        const row = el('a', { class: 'm-row', href: path('/server/' + server.id + '/channel/' + channel.id) },
+        list.appendChild(el('a', { class: 'm-row', href: path('/server/' + server.id + '/channel/' + channel.id) },
           el('span', { class: 'm-row__lead' }, icon(channelIcon(channel), { size: 16 })),
-          el('span', { class: 'm-row__body' }, el('span', { class: 'm-row__title truncate' }, channel.name)));
-        // A long press on a channel raises the actions that belong to it.
-        attachLongPress(row, () => channelActions(server.id, channel, null), { title: '#' + channel.name });
-        list.appendChild(row);
+          el('span', { class: 'm-row__body' }, el('span', { class: 'm-row__title truncate' }, channel.name))));
       }
     } else {
       list.appendChild(el('div', { class: 'm-row' },

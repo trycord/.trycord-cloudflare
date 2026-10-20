@@ -12,15 +12,12 @@ import { TrycordConfig } from '../packages/config.js';
 import {
   State, on as onStore, loadInstance, loadLegal, loadSession, logout,
   refreshServers, refreshDms, refreshFriends, refreshNotifications,
-  markConversationRead,
 } from '../packages/store.js';
 import { installLinkHandler, installPopStateHandler, navigate, BASE } from '../packages/nav.js';
-import { loadLocale } from '../packages/locale.js';
 import realtime, { on as onRealtime, EVENTS, SESSION_EVENTS } from '../packages/realtime.js';
 import { bind } from '../packages/registry.js';
 import { RENDERERS } from './features/index.js';
 import { mountVoiceDock } from './voice/dock.js';
-import * as encrypted from './ui/encrypted.js';
 import { setLocalUserId, leave as voiceLeave } from './voice/session.js';
 import { run } from './router.js';
 
@@ -77,17 +74,6 @@ function wireChrome() {
   onRealtime(SESSION_EVENTS.SESSION_REVOKED, () => {
     logout().catch(() => { /* the token is already gone */ });
   });
-  // A conversation read elsewhere. The event says who read it: when that is
-  // this account - on another device - the badge here is stale and is
-  // cleared. When it is somebody else, the unread count is still this
-  // account's own, so nothing about it changes.
-  onRealtime(EVENTS.DM_READ, (event) => {
-    const reader = event.userId || event.user_id;
-    const me = State.user && State.user.id;
-    if (reader && me && String(reader) !== String(me)) return;
-    const id = event.conversationId || event.conversation_id || event.id;
-    if (markConversationRead(id)) refreshChrome();
-  });
 }
 
 function wireSignOut() {
@@ -101,11 +87,6 @@ function wireSignOut() {
   onStore('signed-out', () => {
     voiceLeave().catch(() => { /* there was nothing to leave */ });
     realtime.disconnect();
-    // The encryption client is dropped with the session. The device's keys stay
-    // on the device - a device is an identity and does not change because
-    // somebody signed out - but the open client belongs to the account that
-    // is no longer here.
-    encrypted.reset();
     setSession('out');
   });
   // The attribute is how a document says whether it is signed in - the checks and
@@ -150,12 +131,6 @@ async function boot() {
 
   try {
     await loadSession();
-    // The device is registered as soon as the reader is signed in. A device
-    // that has never registered cannot hold a conversation key, so a
-    // conversation would sit in `mixed` rather than `encrypted` and every
-    // message in it would stay in the clear. A failure here is not fatal: the
-    // reader can still talk, and the encryption page says what went wrong.
-    encrypted.ready().catch(() => { /* the encryption page reports it */ });
   } catch {
     // A network failure is not a signed-out reader, but the login screen is the
     // only honest page to show until the instance answers again.
@@ -163,12 +138,6 @@ async function boot() {
   }
   setSession(State.user ? 'in' : 'out');
   setLocalUserId(() => (State.user && State.user.id) || '');
-
-  // The locale the instance answers in, and the strings it answers with. A
-  // reader who is signed in gets their own preference here. An instance that
-  // cannot answer leaves the interface in its built-in language.
-  try { await loadLocale(); } catch { /* the built-in language stands */ }
-
   if (State.user) {
     await Promise.allSettled([refreshServers(), refreshDms(), refreshFriends(), refreshNotifications()]);
     realtime.connect();

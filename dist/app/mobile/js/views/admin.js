@@ -11,14 +11,13 @@
 import { el, clear } from '../../../packages/dom.js';
 import { icon } from '../../../packages/icons.js';
 import { avatar, serverMark, empty, loading, failure } from '../components.js';
+import { nameOf } from '../../../packages/store.js';
 import { path, navigate } from '../../../packages/nav.js';
 import { scopeNav } from '../../../packages/registry.js';
-import { toast, menu, sheet, confirm, attachLongPress } from '../ui.js';
+import { toast, menu, sheet, confirm } from '../ui.js';
 import { relativeTime } from '../../../packages/format.js';
 import Api from '../../../packages/api.js';
 import { screen, notice, stat, primaryButton, ghostButton } from './util.js';
-import { continuum, moderationSurface } from './federation.js';
-import { voiceBody } from './voice.js';
 
 function field(label, control, note) {
   return el('label', { class: 'm-field' },
@@ -124,7 +123,7 @@ function usersBody() {
 
   function rowFor(user) {
     const name = user.display_name || user.displayName || user.username;
-    const row = el('div', { class: 'm-row' },
+    return el('div', { class: 'm-row' },
       el('span', { class: 'm-row__lead' }, avatar({ id: user.id, username: user.username, displayName: name }, { size: 'md', decorative: true })),
       el('span', { class: 'm-row__body' },
         el('span', { class: 'm-row__title truncate' }, name),
@@ -133,24 +132,16 @@ function usersBody() {
         class: 'm-btn m-btn--sm m-btn--ghost', type: 'button',
         onClick: () => menuFor(user),
       }, 'Actions')));
-    // A long press on the account raises the same actions.
-    attachLongPress(row, () => userActions(user), { title: name });
-    return row;
-  }
-
-  // The actions on an account, one list, raised either way.
-  function userActions(user) {
-    return [
-      { label: 'Suspend', icon: 'clock', onSelect: () => promptEnforce(user, 'USER_SUSPENSION') },
-      { label: 'Ban', icon: 'ban', danger: true, onSelect: () => promptEnforce(user, 'USER_BAN') },
-      { label: 'Lift enforcement', icon: 'check', onSelect: () => promptLift(user) },
-    ];
   }
 
   function menuFor(user) {
     menu({
       title: user.display_name || user.username,
-      items: userActions(user),
+      items: [
+        { label: 'Suspend', icon: 'clock', onSelect: () => promptEnforce(user, 'USER_SUSPENSION') },
+        { label: 'Ban', icon: 'ban', danger: true, onSelect: () => promptEnforce(user, 'USER_BAN') },
+        { label: 'Lift enforcement', icon: 'check', onSelect: () => promptLift(user) },
+      ],
     });
   }
 
@@ -289,7 +280,7 @@ function reportsBody() {
 
   function rowFor(report) {
     const reason = report.reason || report.description || '(no reason)';
-    const row = el('div', { class: 'm-row' },
+    return el('div', { class: 'm-row' },
       el('span', { class: 'm-row__lead' }, icon('flag', { size: 17 })),
       el('span', { class: 'm-row__body' },
         el('span', { class: 'm-row__title truncate' }, reason),
@@ -297,12 +288,6 @@ function reportsBody() {
       el('span', { class: 'm-row__actions' },
         el('button', { class: 'm-btn m-btn--sm m-btn--ghost', type: 'button', onClick: () => update(report.id, 'RESOLVED') }, 'Resolve'),
         el('button', { class: 'm-btn m-btn--sm m-btn--ghost', type: 'button', onClick: () => update(report.id, 'DISMISSED') }, 'Dismiss')));
-    // A long press on the report raises the same two decisions.
-    attachLongPress(row, () => [
-      { label: 'Resolve the report', icon: 'check', onSelect: () => update(report.id, 'RESOLVED') },
-      { label: 'Dismiss the report', icon: 'x', onSelect: () => update(report.id, 'DISMISSED') },
-    ], { title: reason });
-    return row;
   }
 
   async function update(id, status) {
@@ -552,88 +537,6 @@ function pagesBody() {
           el('span', { class: 'm-row__actions' },
             el('a', { class: 'm-btn m-btn--sm m-btn--ghost', href: path('/' + row.route), target: '_blank', rel: 'noopener' },
               'View', el('span', { class: 'm-row__lead' }, icon('external', { size: 14 }))))));
-      }
-    } catch (error) {
-      list.replaceChildren(failure(error, load));
-    }
-  }
-
-  load();
-  return host;
-}
-
-// -- approvals ----------------------------------------------------------------
-
-function approvalsBody() {
-  const host = el('div', { class: 'm-stack' });
-  const list = el('div', { class: 'm-list' });
-  host.appendChild(list);
-
-  async function load() {
-    list.replaceChildren(loading('Loading the waiting accounts'));
-    try {
-      const data = await Api.adminApprovals();
-      list.replaceChildren();
-      if (!data || data.enabled === false) {
-        list.appendChild(el('div', { class: 'm-row' }, el('span', { class: 'm-row__body' }, el('span', { class: 'm-row__sub' }, 'Approval is off for this instance.'))));
-        return;
-      }
-      const pending = Array.isArray(data.pending) ? data.pending : [];
-      if (!pending.length) {
-        list.appendChild(el('div', { class: 'm-row' }, el('span', { class: 'm-row__body' }, el('span', { class: 'm-row__sub' }, 'Nobody is waiting to be let in.'))));
-        return;
-      }
-      for (const account of pending) {
-        list.appendChild(el('div', { class: 'm-row' },
-          el('span', { class: 'm-row__lead' }, icon('user', { size: 17 })),
-          el('span', { class: 'm-row__body' },
-            el('span', { class: 'm-row__title truncate' }, account.displayName || account.username || 'An account'),
-            el('span', { class: 'm-row__sub truncate' }, '@' + (account.username || ''))),
-          el('span', { class: 'm-row__actions' },
-            el('button', {
-              class: 'm-btn m-btn--sm m-btn--primary', type: 'button',
-              onClick: async () => {
-                try {
-                  await Api.approveUser(account.id);
-                  toast('Approved.', { type: 'success' });
-                  load();
-                } catch (error) { toast(error.message, { type: 'danger' }); }
-              },
-            }, 'Approve'))));
-      }
-    } catch (error) {
-      list.replaceChildren(failure(error, load));
-    }
-  }
-
-  load();
-  return host;
-}
-
-// -- diagnostics --------------------------------------------------------------
-
-function diagnosticsBody() {
-  const host = el('div', { class: 'm-stack' });
-  const list = el('div', { class: 'm-list' });
-  host.appendChild(list);
-
-  async function load() {
-    list.replaceChildren(loading('Reading the subsystems'));
-    try {
-      const report = await Api.adminDiagnostics();
-      const subsystems = report.subsystems || {};
-      list.replaceChildren();
-      for (const [name, entry] of Object.entries(subsystems)) {
-        const detail = entry && (entry.note || entry.error || (typeof entry.detail === 'string' ? entry.detail : ''));
-        list.appendChild(el('div', { class: 'm-row' },
-          el('span', { class: 'm-row__lead' }, icon('activity', { size: 17 })),
-          el('span', { class: 'm-row__body' },
-            el('span', { class: 'm-row__title truncate' }, name),
-            el('span', { class: 'm-row__sub truncate' }, String(entry.state || 'unknown') + (detail ? ' · ' + detail : ''))),
-          el('span', { class: 'm-row__actions' }, icon('check', { size: 16 }))));
-      }
-      if (!Object.keys(subsystems).length) {
-        list.appendChild(el('div', { class: 'm-row' }, el('span', { class: 'm-row__body' }, el('span', { class: 'm-row__sub' }, 'This instance reported no subsystems.'))));
       }
     } catch (error) {
       list.replaceChildren(failure(error, load));
@@ -1329,248 +1232,6 @@ function openAddSheet(refresh) {
   return layer;
 }
 
-// -- incidents ----------------------------------------------------------------
-//
-// The incident timeline an operator writes. What is written here is what the
-// status page shows, so the screen says plainly what it will do: it posts what
-// you write.
-
-const INCIDENT_STATUSES = [
-  ['investigating', 'Being looked at'],
-  ['identified', 'The cause is known'],
-  ['monitoring', 'Being watched'],
-  ['resolved', 'Resolved'],
-];
-
-function incidentsBody() {
-  const host = el('div', { class: 'm-stack' });
-  const list = el('div', { class: 'm-list' });
-
-  const kind = el('select', { class: 'm-input m-input--select', 'aria-label': 'What kind of entry this is' });
-  kind.appendChild(el('option', { value: 'incident' }, 'An incident'));
-  kind.appendChild(el('option', { value: 'maintenance' }, 'Planned maintenance'));
-  const status = el('select', { class: 'm-input m-input--select', 'aria-label': 'The status' });
-  for (const [value, label] of INCIDENT_STATUSES) {
-    status.appendChild(el('option', { value }, label));
-  }
-  const title = el('input', { class: 'm-input', type: 'text', 'aria-label': 'The title', placeholder: 'What it says at a glance' });
-  const summary = el('input', { class: 'm-input', type: 'text', 'aria-label': 'The summary', placeholder: 'What is happening' });
-  const body = el('input', { class: 'm-input', type: 'text', 'aria-label': 'The note under it', placeholder: 'Anything else people should know' });
-  const scheduled = el('input', { class: 'm-input', type: 'datetime-local', 'aria-label': 'The date the maintenance is planned for' });
-  const note = el('p', { class: 'm-notice__text' });
-
-  function paintScheduled() {
-    scheduled.hidden = kind.value !== 'maintenance';
-  }
-  kind.addEventListener('change', paintScheduled);
-  paintScheduled();
-
-  const post = el('button', { class: 'm-btn m-btn--block m-btn--primary', type: 'button' }, 'Post it');
-  post.addEventListener('click', async () => {
-    if (!title.value.trim() || !summary.value.trim()) {
-      note.textContent = 'An incident needs a title and a summary.';
-      return;
-    }
-    if (kind.value === 'maintenance' && !scheduled.value) {
-      note.textContent = 'Planned maintenance needs the date it is planned for.';
-      return;
-    }
-    note.textContent = '';
-    post.disabled = true;
-    try {
-      await Api.createIncident({
-        kind: kind.value,
-        status: kind.value === 'maintenance' ? 'scheduled' : status.value,
-        title: title.value.trim(),
-        summary: summary.value.trim(),
-        body: body.value.trim() || undefined,
-        scheduledFor: kind.value === 'maintenance' ? scheduled.value : undefined,
-      });
-      title.value = '';
-      summary.value = '';
-      body.value = '';
-      scheduled.value = '';
-      toast('Posted. It is on the status page now.', { type: 'success' });
-      await paint();
-    } catch (error) { toast(error.message, { type: 'danger' }); }
-    finally { post.disabled = false; }
-  });
-
-  async function paint() {
-    clear(list);
-    list.appendChild(loading('Reading the timeline'));
-    try {
-      const rows = await Api.incidents({ limit: 100 });
-      const entries = Array.isArray(rows) ? rows : [];
-      clear(list);
-      if (!entries.length) {
-        list.appendChild(empty({
-          icon: 'activity',
-          title: 'Nothing has been recorded',
-          text: 'An instance with nothing recorded says so.',
-        }));
-        return;
-      }
-      for (const entry of entries) {
-        const next = INCIDENT_STATUSES[INCIDENT_STATUSES.findIndex(([value]) => value === entry.status) + 1];
-        list.appendChild(el('div', { class: 'm-row' },
-          el('span', { class: 'm-row__body' },
-            el('span', { class: 'm-row__title truncate' }, entry.title),
-            el('span', { class: 'm-row__sub truncate' },
-              (INCIDENT_STATUSES.find(([value]) => value === entry.status) || [null, entry.status])[1]
-              + ' · ' + relativeTime(entry.startedAt))),
-          el('span', { class: 'm-row__actions' },
-            next ? el('button', {
-              class: 'm-btn m-btn--sm m-btn--ghost', type: 'button',
-              onClick: async () => {
-                try {
-                  await Api.updateIncident(entry.id, { status: next[0] });
-                  toast('Moved to ' + next[1].toLowerCase() + '.', { type: 'success' });
-                  await paint();
-                } catch (error) { toast(error.message, { type: 'danger' }); }
-              },
-            }, 'Next') : null,
-            entry.status !== 'resolved' ? el('button', {
-              class: 'm-btn m-btn--sm m-btn--ghost', type: 'button',
-              onClick: async () => {
-                const sure = await confirm({
-                  title: 'Close this incident?',
-                  text: 'It stays on the timeline, marked resolved. Nothing is deleted.',
-                  confirmLabel: 'Close it',
-                });
-                if (!sure) return;
-                try {
-                  await Api.updateIncident(entry.id, { status: 'resolved' });
-                  toast('Closed.', { type: 'success' });
-                  await paint();
-                } catch (error) { toast(error.message, { type: 'danger' }); }
-              },
-            }, 'Close') : null)));
-      }
-    } catch (error) {
-      clear(list);
-      list.appendChild(failure(error, paint));
-    }
-  }
-
-  host.append(
-    group('Post an incident', el('div', { class: 'm-stack' },
-      field('Kind', kind),
-      field('Status', status),
-      field('Title', title),
-      field('Summary', summary),
-      field('Note', body),
-      field('Planned for', scheduled),
-      note,
-      post)),
-    group('The timeline', list));
-
-  paint();
-  return host;
-}
-
-// -- federation reports -------------------------------------------------------
-//
-// The reports other instances sent about this one, and the other half of the
-// relay: what the members of this instance's communities wrote on other
-// instances. That is the owner's to moderate, and the platform administrator
-// moderates every community of the instance, so it is drawn here in full.
-
-function federationBody() {
-  const host = el('div', { class: 'm-stack' });
-  const list = el('div', { class: 'm-list' });
-  const moderation = el('div', { class: 'm-stack' });
-  // What the server answered the last time. It lives here rather than in the
-  // surface, so that re-reading the surface after an action does not take the
-  // answer with it.
-  const answer = el('div', { class: 'm-stack' });
-
-  function say(title, text, tone) {
-    answer.replaceChildren(notice({ tone: tone || 'info', role: 'status', title, text }));
-  }
-
-  async function paint() {
-    clear(list);
-    list.appendChild(loading('Reading the reports'));
-    try {
-      const rows = await Api.inboundFederationReports(100);
-      const reports = Array.isArray(rows) ? rows : [];
-      clear(list);
-      if (!reports.length) {
-        list.appendChild(empty({
-          icon: 'share',
-          title: 'No reports have arrived',
-          text: 'When another instance sends a report about something here, it is listed here.',
-        }));
-        return;
-      }
-      for (const entry of reports) {
-        list.appendChild(el('div', { class: 'm-row' },
-          el('span', { class: 'm-row__lead' }, icon('flag', { size: 17 })),
-          el('span', { class: 'm-row__body' },
-            el('span', { class: 'm-row__title truncate' }, entry.reason),
-            el('span', { class: 'm-row__sub truncate' },
-              'about a ' + (entry.contentType || 'message') + ' on this instance')),
-          el('span', { class: 'm-row__actions' },
-            el('span', { class: 'm-chip' }, entry.actionable ? 'actionable' : 'no content here'))));
-      }
-    } catch (error) {
-      clear(list);
-      list.appendChild(failure(error, paint));
-    }
-  }
-
-  // What the members of this instance's communities wrote on other instances.
-  //
-  // The whole instance is in scope here: the platform administrator moderates
-  // every community of it, so the relay is read without naming a community.
-  async function paintModeration() {
-    clear(moderation);
-    moderation.appendChild(loading('Reading what the members of this instance wrote elsewhere'));
-    try {
-      const [servers, messages, members] = await Promise.all([
-        Api.adminServers({ limit: '100' }),
-        continuum.moderationMessages(),
-        continuum.moderationMembers(),
-      ]);
-      const names = {};
-      for (const server of Array.isArray(servers) ? servers : []) names[server.id] = server.name;
-      clear(moderation);
-      moderation.appendChild(moderationSurface({
-        messages: Array.isArray(messages) ? messages : [],
-        members: Array.isArray(members) ? members : [],
-        names,
-        refresh: paintModeration,
-        answer,
-        say,
-      }));
-    } catch (error) {
-      clear(moderation);
-      // Federation switched off is not a failure: the instance says so.
-      if (error && error.status === 404) {
-        moderation.appendChild(empty({
-          icon: 'share',
-          title: 'Nothing to show',
-          text: 'Federation is not enabled on this instance.',
-        }));
-        return;
-      }
-      moderation.appendChild(failure(error, paintModeration));
-    }
-  }
-
-  host.append(
-    group('Reports received', list),
-    moderation,
-    group('What a report carries', el('p', { class: 'm-lede' },
-      'A reference and a reason. The content stays where it was written, and nothing '
-      + 'about the person who reported it crosses either.')));
-
-  paint();
-  paintModeration();
-  return host;
-}
-
 // -- the admin shell ---------------------------------------------------------
 
 export function renderAdmin(ctx) {
@@ -1580,7 +1241,6 @@ export function renderAdmin(ctx) {
   const bodies = {
     admin: overviewBody,
     'admin.users': usersBody,
-    'admin.approvals': approvalsBody,
     'admin.communities': communitiesBody,
     'admin.reports': reportsBody,
     'admin.appeals': appealsBody,
@@ -1591,10 +1251,6 @@ export function renderAdmin(ctx) {
     'admin.settings': instanceSettingsBody,
     'admin.database': databaseBody,
     'admin.continuum': continuumBody,
-    'admin.voice': voiceBody,
-    'admin.diagnostics': diagnosticsBody,
-    'admin.incidents': incidentsBody,
-    'admin.federation': federationBody,
   };
   const active = bodies[initial] ? initial : 'admin';
 

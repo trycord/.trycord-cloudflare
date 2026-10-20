@@ -94,16 +94,8 @@ export function buildFrame() {
 
   const connection = el('div', { class: 'connection', id: 'connection-status', role: 'status' });
   const alertsSlot = el('div', { class: 'cmdbar-alerts' });
-  // The inspector is the shell's own chrome, so its control lives beside the
-  // navigation control. It is hidden until the page on screen has a panel to
-  // show - a control that cannot open anything is not offered.
-  const inspectorToggle = el('button', {
-    class: 'icon-btn context-toggle cmdbar-panel', type: 'button',
-    'aria-label': 'The panel beside this page', 'aria-expanded': 'false',
-    hidden: true,
-  }, icon('panel-left', { size: 18 }));
   const commandBar = el('header', { class: 'cmdbar', id: 'command-bar', 'aria-label': 'Command bar' },
-    navToggle, omnibox, el('div', { class: 'spacer' }), inspectorToggle, connection, alertsSlot);
+    navToggle, omnibox, el('div', { class: 'spacer' }), connection, alertsSlot);
 
   // -- the rail --------------------------------------------------------------
   const rail = el('nav', {
@@ -128,13 +120,7 @@ export function buildFrame() {
   const stageBody = el('div', { class: 'stage-body', id: 'view-root', tabindex: '-1' });
   const composerSlot = el('div', { class: 'composer-slot', hidden: true });
   const screen = el('div', { class: 'screen', id: 'screen' }, stageHead, stageBody, composerSlot);
-  // The stage is the reading column, and a reading column has a width the
-  // reader chooses. Its grip sits on the right edge, so a drag narrows it.
-  const stageGrip = el('div', {
-    class: 'grip grip--stage', role: 'separator', 'aria-orientation': 'vertical',
-    'aria-label': 'Resize the reading column', tabindex: '0',
-  });
-  const stage = el('main', { class: 'stage', id: 'trycord-main' }, screen, stageGrip);
+  const stage = el('main', { class: 'stage', id: 'trycord-main' }, screen);
 
   // -- floating layers -------------------------------------------------------
   const inspectorHead = el('header', { class: 'inspector-head', id: 'inspector-head' });
@@ -157,9 +143,9 @@ export function buildFrame() {
   }, skip, commandBar, rail, column, stage, inspector, scrim, dock);
 
   const refs = {
-    root, commandBar, navToggle, omnibox, kbd, connection, alertsSlot, inspectorToggle,
+    root, commandBar, navToggle, omnibox, kbd, connection, alertsSlot,
     rail, column, columnHead, columnBody, columnFoot, columnGrip,
-    stage, stageHead, stageBody, composerSlot, stageGrip,
+    stage, stageHead, stageBody, composerSlot,
     inspector, inspectorGrip, inspectorHead, inspectorBody,
     scrim, dock, skip,
   };

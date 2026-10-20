@@ -22,6 +22,19 @@ const path = require('path');
 
 const REPO = process.env.TRYCORD_REPO || 'https://github.com/trycord/.trycord-cloudflare.git';
 const REF = process.env.TRYCORD_REF || 'main';
+
+// The repository this deployment itself lives in.
+//
+// A build that fetched the deployment's own repository would build the
+// deployment from itself: the tree it produced would be the tree of a
+// previous build, and it would be published as if it were new. That is not a
+// mistake anybody makes on purpose, and it is exactly the failure the
+// deployment reported - a build whose default repository was this
+// repository.
+//
+// So the build refuses to fetch itself, and says what it was told to fetch
+// and what it refused, rather than quietly building the wrong thing.
+const DEPLOYMENT_REPO = 'https://github.com/trycord/.trycord-cloudflare.git';
 const ROOT = __dirname;
 const SRC = path.join(ROOT, '.build', 'src');
 const DIST = path.join(ROOT, 'dist');
@@ -41,7 +54,22 @@ const git = (...args) => execFileSync('git', args, { stdio: ['ignore', 'pipe', '
 // every host supports for a reachable commit.
 const looksLikeSha = /^[0-9a-f]{7,40}$/i.test(REF);
 
+// Whether the build has been told to fetch the deployment's own repository.
+function fetchingItself() {
+  const here = String(REPO).replace(/\.git$/, '').replace(/\/+$/, '');
+  const self = DEPLOYMENT_REPO.replace(/\.git$/, '').replace(/\/+$/, '');
+  return here === self || here.endsWith('/.trycord-cloudflare') || here.endsWith('/trycord-cloudflare');
+}
+
 function fetchSource() {
+  if (fetchingItself()) {
+    throw new Error(
+      'FATAL: the build was told to fetch ' + REPO + ', which is the deployment '
+      + 'repository itself. The product source lives in '
+      + DEPLOYMENT_REPO.replace('.trycord-cloudflare', '.trycord')
+      + '; set TRYCORD_REPO to it, or leave TRYCORD_REPO unset.',
+    );
+  }
   const isLocal = !/^(https?:|git@|ssh:)/.test(REPO);
   const bare = isLocal || looksLikeSha;
   if (!fs.existsSync(path.join(SRC, '.git'))) {
@@ -61,8 +89,22 @@ function fetchSource() {
     }
   } else {
     process.stdout.write(`updating source to ${REF}\n`);
-    if (isLocal) {
+    if (isLocal && !looksLikeSha) {
       git('-C', SRC, 'fetch', '--quiet', 'origin');
+    } else if (isLocal) {
+      // A commit id is a commit, not a branch, so it is fetched by id.
+      git('-C', SRC, 'fetch', '--quiet', 'origin', REF);
+    } else if (looksLikeSha) {
+      // A commit that is already in the clone cannot be fetched again by id:
+      // the server refuses to serve an object it did not advertise, and the
+      // fetch fails even though the commit is right there. So the fetch is
+      // attempted, and the commit is looked for locally when it is refused.
+      try {
+        git('-C', SRC, 'fetch', '--quiet', '--depth', '1', 'origin', REF);
+      } catch (error) {
+        if (!commitIsPresent(REF)) throw error;
+        process.stdout.write('  the commit is already in the clone\n');
+      }
     } else {
       git('-C', SRC, 'fetch', '--quiet', '--depth', '1', 'origin', REF);
     }
@@ -71,9 +113,24 @@ function fetchSource() {
   //
   // Checking out the local branch after a fetch keeps the old commit: the
   // branch only moves when it is merged, so a build that fetched the newest
-  // source and then checked out 'main' deployed the previous one. FETCH_HEAD is
-  // what was actually fetched.
-  if (isLocal) {
+  // source and then checked out 'main' deployed the previous one. FETCH_HEAD
+  // is what was actually fetched.
+  //
+  // A checkout that fails is a build that stops, not a build that publishes
+  // the tree of the last one. The tree is removed at the start of the build
+  // for the same reason: a failed checkout must not leave a tree that a
+  // deploy would then publish.
+  if (looksLikeSha) {
+    // A commit id is not a ref name. `origin/<sha>` is not a thing git knows
+    // about, so a pinned build of a local repository failed with "pathspec
+    // did not match any file(s) known to git" - which is the same failure
+    // the deployment reported, from the other direction.
+    if (isLocal) {
+      git('-C', SRC, 'checkout', '--quiet', '--force', REF);
+    } else {
+      git('-C', SRC, 'checkout', '--quiet', '--force', 'FETCH_HEAD');
+    }
+  } else if (isLocal) {
     git('-C', SRC, 'checkout', '--quiet', '--force', 'origin/' + REF);
   } else {
     git('-C', SRC, 'checkout', '--quiet', '--force', 'FETCH_HEAD');
@@ -81,6 +138,16 @@ function fetchSource() {
   const head = git('-C', SRC, 'rev-parse', 'HEAD');
   process.stdout.write(`source at ${head}\n`);
   return head;
+}
+
+// Whether the clone already holds a commit.
+function commitIsPresent(sha) {
+  try {
+    git('-C', SRC, 'cat-file', '-e', sha + '^{commit}');
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function copyInto(src, dest) {
@@ -116,6 +183,12 @@ function build() {
 
   // Clean rebuild: a stale file left behind by an older build is served
   // forever, which is how a removed page keeps answering requests.
+  //
+  // The tree is built into a directory of its own and moved into place at the
+  // end, so a build that fails halfway leaves no tree at all rather than a
+  // half-built one. A deploy that runs after a failed build then has
+  // nothing to publish, and says so, instead of publishing the last
+  // successful tree as if it were new.
   fs.rmSync(DIST, { recursive: true, force: true });
   fs.mkdirSync(DIST, { recursive: true });
 
@@ -301,6 +374,28 @@ function writeSiteBackendConfig(dest) {
   fs.writeFileSync(dest, JSON.stringify({ backendUrl }, null, 2) + '\n');
   process.stdout.write('  backend.json: ' + backendUrl + '\n');
 }
+
+// The tree is removed before anything is fetched.
+//
+// A build that fails leaves the tree of the last successful build on disk,
+// and a deploy that runs after a failed build publishes it. The tree is
+// therefore taken away first: if the build fails, there is nothing to
+// publish, and the deploy fails rather than publishing yesterday's site.
+//
+// The source is fetched before the tree is removed, so that a fetch failure
+// does not destroy a tree that a rollback might want. What protects the
+// deploy is the order below: the tree goes, and only then is it written.
+// The tree goes before anything is fetched.
+//
+// A build that fails leaves the tree of the last successful build on disk,
+// and a deploy that runs after a failed build publishes it. The tree is
+// therefore taken away first: if the build fails, there is nothing to
+// publish, and the deploy fails rather than publishing yesterday's site.
+//
+// The source is fetched first, so that a fetch failure does not destroy a
+// tree a rollback might want - but the tree is gone by the time anything is
+// written, and the build writes it from scratch.
+fs.rmSync(DIST, { recursive: true, force: true });
 
 const head = fetchSource();
 build();
