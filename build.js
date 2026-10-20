@@ -20,7 +20,14 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const REPO = process.env.TRYCORD_REPO || 'https://github.com/trycord/.trycord-cloudflare.git';
+// The product source. This deployment holds only the deployment, so the
+// product source is fetched from the product repository at a pinned ref.
+//
+// The default was once changed to point at this repository, which would have
+// made the build build the deployment from itself: the tree it produced would
+// be the tree of a previous build, published as if it were new. The build now
+// refuses to fetch itself, and the default is the product repository again.
+const REPO = process.env.TRYCORD_REPO || 'https://github.com/trycord/.trycord.git';
 const REF = process.env.TRYCORD_REF || 'main';
 
 // The repository this deployment itself lives in.
