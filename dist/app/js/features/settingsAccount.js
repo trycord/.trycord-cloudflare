@@ -24,6 +24,9 @@ function paint(identity, user) {
     'aria-label': 'About you',
     placeholder: 'A few words for the people who open your profile',
   });
+  // The words the reader already wrote are shown, so saving the page does not
+  // quietly replace them with an empty box.
+  about.value = user.bio || '';
   let avatarFile = null;
   let bannerFile = null;
 
@@ -65,7 +68,18 @@ function paint(identity, user) {
                   reload();
                 } catch (e) { errorToast(e); }
               },
-            }, 'Remove banner') : null)),
+            }, 'Remove banner') : null,
+            user.avatarUrl ? el('button', {
+              class: 'btn btn--ghost btn--sm', type: 'button',
+              'aria-label': 'Remove the avatar',
+              onClick: async () => {
+                try {
+                  await Api.removeProfileImage('avatar');
+                  toast('Avatar removed');
+                  reload();
+                } catch (e) { errorToast(e); }
+              },
+            }, 'Remove avatar') : null)),
         user.bannerUrl ? bannerNode(user.bannerUrl, 'settings-banner') : null,
         avatarPick, bannerPick,
       ]),

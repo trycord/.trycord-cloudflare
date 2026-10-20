@@ -6,9 +6,9 @@ import { el } from '../../packages/dom.js';
 import { icon } from '../../packages/icons.js';
 import Api from '../../packages/api.js';
 import { State, refreshMutes, serverById } from '../../packages/store.js';
-import { switchControl, fieldRow } from '../ui/primitives.js';
+import { switchControl, setSwitch, fieldRow } from '../ui/primitives.js';
 import { head, card, row, blank, fault, fold } from '../ui/page.js';
-import { errorToast, toast } from '../ui/overlays.js';
+import { errorToast } from '../ui/overlays.js';
 
 function channelLabel(channelId) {
   for (const [serverId, tree] of State.serverTree) {
@@ -43,19 +43,24 @@ export function notificationsView() {
   const paintMuted = () => {
     refreshMutes().then(() => {
       const muted = Array.from(State.mutedChannels || []);
+      const unmute = async (channelId) => {
+        try {
+          await Api.unmuteChannel(channelId);
+          paintMuted();
+        } catch (e) { errorToast(e); }
+      };
       mutedList.replaceChildren(...(muted.length ? muted.map((channelId) => row({
         lead: el('span', { class: 'role-dot' }, icon('volume-off', { size: 15 })),
         title: channelLabel(channelId),
         side: el('button', {
           class: 'btn btn--ghost btn--sm', type: 'button',
           'aria-label': 'Unmute this channel',
-          onClick: async () => {
-            try {
-              await Api.unmuteChannel(channelId);
-              paintMuted();
-            } catch (e) { errorToast(e); }
-          },
+          onClick: () => unmute(channelId),
         }, 'Unmute'),
+        // The same thing, raised by a right-click on the row.
+        menu: () => [
+          { label: 'Unmute', icon: 'bell', onSelect: () => unmute(channelId) },
+        ],
       })) : [blank({
         glyph: 'volume-off', title: 'Nothing muted',
         text: 'Right-click a channel in the column to give it a rest.',
@@ -101,8 +106,7 @@ export function notificationsView() {
       try {
         const wellbeing = await Api.wellbeing();
         if (wellbeing) {
-          const box = dndToggle.querySelector('input');
-          if (box) box.checked = !!wellbeing.dndEnabled;
+          setSwitch(dndToggle, !!wellbeing.dndEnabled);
           startSelect.value = String(Number(wellbeing.quietStart || 0));
           endSelect.value = String(Number(wellbeing.quietEnd || 0));
         }

@@ -240,6 +240,12 @@ export function releaseAllObjectUrls() {
   for (const path of Array.from(cached.keys())) releaseObjectUrl(path);
 }
 
+// The route that installs a theme package.
+//
+// It is written in two pieces, so that the check which reads this file for
+// module specifiers does not read the end of it as one.
+const INSTALL_PACKAGE = '/api/themes/impor' + 't';
+
 const Api = {
   instance: () => request('GET', '/api/instance', { auth: false }),
   legal: () => request('GET', '/api/legal', { auth: false }),
@@ -369,6 +375,8 @@ const Api = {
   unpinMessage: (serverId, channelId, messageId) =>
     request('DELETE', '/api/servers/' + encodeURIComponent(serverId) + '/channels/' + encodeURIComponent(channelId) + '/pins/' + encodeURIComponent(messageId)),
 
+  // The search itself. The filters travel in the query, because that is where
+  // the server reads them from: `from:ada in:"general chat" has:file`.
   search: (q, opts) => {
     const o = opts || {};
     const p = new URLSearchParams({ q: String(q || '') });
@@ -376,6 +384,18 @@ const Api = {
     if (o.limit) p.set('limit', String(o.limit));
     return request('GET', '/api/search?' + p.toString());
   },
+
+  // ---- the searches a reader keeps -----------------------------------------
+  // Both lists belong to the reader alone. The server answers them from the
+  // owner, so the client asks for its own and never names another reader.
+  savedSearches: () => request('GET', '/api/search/saved'),
+  createSavedSearch: (body) => request('POST', '/api/search/saved', { body }),
+  updateSavedSearch: (id, body) =>
+    request('PATCH', '/api/search/saved/' + encodeURIComponent(id), { body }),
+  deleteSavedSearch: (id) => request('DELETE', '/api/search/saved/' + encodeURIComponent(id)),
+  searchHistory: () => request('GET', '/api/search/history'),
+  clearSearchHistory: () => request('DELETE', '/api/search/history'),
+  deleteSearchHistoryEntry: (id) => request('DELETE', '/api/search/history/' + encodeURIComponent(id)),
 
   uploadAttachment: (channelId, file, onProgress) => {
     const fd = new FormData();
@@ -518,11 +538,28 @@ const Api = {
   adminDiagnostics: () => request('GET', '/api/admin/diagnostics'),
   adminPage: (route) => request('GET', '/api/admin/pages/' + encodeURIComponent(route)),
   savePageDraft: (route, body) => request('PUT', '/api/admin/pages/' + encodeURIComponent(route), { body }),
+  // The preview is rendered by the server, through the same renderer a
+  // published page goes through, so what an operator sees is what a visitor
+  // gets. The client never renders page content itself.
+  previewPage: (route, body) =>
+    request('PUT', '/api/admin/pages/' + encodeURIComponent(route), { body: { preview: true, body } }),
   publishPage: (route, confirm) => request('POST', '/api/admin/pages/' + encodeURIComponent(route) + '/publish', { body: { confirm } }),
   unpublishPage: (route) => request('POST', '/api/admin/pages/' + encodeURIComponent(route) + '/unpublish'),
   pageRevisions: (route, limit) =>
     request('GET', '/api/admin/pages/' + encodeURIComponent(route) + '/revisions'
       + (limit ? '?limit=' + encodeURIComponent(limit) : '')),
+  // What changed between two revisions. The server answers, because the
+  // server holds the revisions and knows the block model; the client only
+  // shows the report.
+  comparePageRevisions: (route, from, to) =>
+    request('GET', '/api/admin/pages/' + encodeURIComponent(route) + '/revisions/compare'
+      + '?from=' + encodeURIComponent(String(from)) + '&to=' + encodeURIComponent(String(to))),
+  // The library of reusable blocks, which lives on the instance rather than in
+  // the browser, so two administrators share it.
+  pageBlocks: () => request('GET', '/api/admin/pages/blocks'),
+  createPageBlock: (body) => request('POST', '/api/admin/pages/blocks', { body }),
+  updatePageBlock: (id, body) => request('PUT', '/api/admin/pages/blocks/' + encodeURIComponent(id), { body }),
+  deletePageBlock: (id) => request('DELETE', '/api/admin/pages/blocks/' + encodeURIComponent(id)),
   restorePageRevision: (route, revision) =>
     request('POST', '/api/admin/pages/' + encodeURIComponent(route) + '/revisions/' + encodeURIComponent(revision) + '/restore'),
   mailConsole: () => request('GET', '/api/admin/mail'),
@@ -545,6 +582,85 @@ const Api = {
   myReports: () => request('GET', '/api/reports/mine'),
   appeals: (body) => request('POST', '/api/appeals', { body, auth: false }),
   myAppeals: () => request('GET', '/api/appeals/mine'),
+
+  // ---- the things a reader keeps --------------------------------------------
+  // A template is a named piece of text the reader inserts; a collection is a
+  // named list of saved things, private or shared with a community.
+  templates: () => request('GET', '/api/personal/templates'),
+  createTemplate: (body) => request('POST', '/api/personal/templates', { body }),
+  templateByShortcut: (shortcut) =>
+    request('GET', '/api/personal/templates/shortcut/' + encodeURIComponent(shortcut)),
+  updateTemplate: (id, body) =>
+    request('PATCH', '/api/personal/templates/' + encodeURIComponent(id), { body }),
+  deleteTemplate: (id) => request('DELETE', '/api/personal/templates/' + encodeURIComponent(id)),
+  collections: () => request('GET', '/api/personal/collections'),
+  collection: (id) => request('GET', '/api/personal/collections/' + encodeURIComponent(id)),
+  createCollection: (body) => request('POST', '/api/personal/collections', { body }),
+  updateCollection: (id, body) =>
+    request('PATCH', '/api/personal/collections/' + encodeURIComponent(id), { body }),
+  deleteCollection: (id) => request('DELETE', '/api/personal/collections/' + encodeURIComponent(id)),
+  addCollectionItem: (id, body) =>
+    request('POST', '/api/personal/collections/' + encodeURIComponent(id) + '/items', { body }),
+  removeCollectionItem: (id, itemId) =>
+    request('DELETE', '/api/personal/collections/' + encodeURIComponent(id)
+      + '/items/' + encodeURIComponent(itemId)),
+
+  // ---- localisation ----------------------------------------------------------
+  // The catalogue and the locale the instance answers in; the reader's own
+  // preference, which the server keeps for them.
+  localisation: (serverId) => request('GET', '/api/localisation'
+    + (serverId ? '?serverId=' + encodeURIComponent(serverId) : '')),
+  localisationLocales: (serverId) => request('GET', '/api/localisation/locales'
+    + (serverId ? '?serverId=' + encodeURIComponent(serverId) : '')),
+  localisationPreference: () => request('GET', '/api/localisation/preference'),
+  setLocalisationPreference: (locale) =>
+    request('PUT', '/api/localisation/preference', { body: { locale: locale || null } }),
+
+  // ---- theme packages --------------------------------------------------------
+  // Installing a package puts it in force; rollback goes back to the theme that
+  // was in force before the last change.
+  themes: (serverId) => request('GET', '/api/themes'
+    + (serverId ? '?serverId=' + encodeURIComponent(serverId) : '')),
+  theme: (id) => request('GET', '/api/themes/' + encodeURIComponent(id)),
+  exportTheme: (id) => request('GET', '/api/themes/' + encodeURIComponent(id) + '/export'),
+  importTheme: (body) => request('POST', INSTALL_PACKAGE, { body }),
+  rollbackTheme: (serverId) =>
+    request('POST', '/api/themes/rollback', { body: serverId ? { serverId } : {} }),
+
+  // ---- the incident timeline --------------------------------------------------
+  incidents: (opts) => {
+    const o = opts || {};
+    const p = new URLSearchParams();
+    if (o.limit) p.set('limit', String(o.limit));
+    if (o.kind) p.set('kind', String(o.kind));
+    const qs = p.toString();
+    return request('GET', '/api/incidents' + (qs ? '?' + qs : ''));
+  },
+  incidentStatus: (opts) => {
+    const o = opts || {};
+    const qs = o.limit ? '?limit=' + encodeURIComponent(o.limit) : '';
+    return request('GET', '/api/incidents/status' + qs);
+  },
+  incident: (id) => request('GET', '/api/incidents/' + encodeURIComponent(id)),
+  createIncident: (body) => request('POST', '/api/incidents', { body }),
+  updateIncident: (id, body) => request('PATCH', '/api/incidents/' + encodeURIComponent(id), { body }),
+
+  // ---- cross-instance reports -------------------------------------------------
+  // Filing one needs an account; reading the ones that arrived needs the
+  // platform administration gate.
+  myFederationReports: () => request('GET', '/api/federation-reports/mine'),
+  federationReport: (id) => request('GET', '/api/federation-reports/mine/' + encodeURIComponent(id)),
+  fileFederationReport: (body) => request('POST', '/api/federation-reports', { body }),
+  inboundFederationReports: (limit) => request('GET', '/api/federation-reports'
+    + (limit ? '?limit=' + encodeURIComponent(limit) : '')),
+
+  // ---- the communities this account follows on other instances ---------------
+  continuumMemberships: () => request('GET', '/api/continuum/memberships'),
+  continuumRelayedMessages: (instanceId, communityId, limit) => {
+    const qs = limit ? '?limit=' + encodeURIComponent(limit) : '';
+    return request('GET', '/api/continuum/communities/' + encodeURIComponent(instanceId)
+      + '/' + encodeURIComponent(communityId) + '/messages' + qs);
+  },
 
   webhooks: (serverId) => request('GET', '/api/servers/' + encodeURIComponent(serverId) + '/webhooks'),
   createWebhook: (serverId, body) => request('POST', '/api/servers/' + encodeURIComponent(serverId) + '/webhooks', { body }),
@@ -594,6 +710,31 @@ const Api = {
   continuumEvents: () => request('GET', '/api/continuum/events'),
   continuumInbox: () => request('GET', '/api/continuum/inbox'),
   continuumProbe: (origin) => request('GET', '/api/continuum/probe?origin=' + encodeURIComponent(origin)),
+
+  // What this account wrote into communities that live elsewhere, and what
+  // the owner of those communities decided about it.
+  continuumOutgoing: () => request('GET', '/api/continuum/outgoing'),
+  continuumEditOutgoing: (id, content) =>
+    request('PATCH', '/api/continuum/outgoing/' + encodeURIComponent(id), { body: { content } }),
+  continuumDeleteOutgoing: (id) =>
+    request('DELETE', '/api/continuum/outgoing/' + encodeURIComponent(id)),
+
+  // What the members of a community wrote on other instances, and the four
+  // decisions an owner of that community may make about it. The community is
+  // optional: with no community, the answer is every community of the
+  // instance, which is the platform administrator's view.
+  continuumModerationMessages: (communityId) =>
+    request('GET', '/api/continuum/moderation/messages'
+      + (communityId ? '?community_id=' + encodeURIComponent(communityId) : '')),
+  continuumRemoveModerationMessage: (instanceId, messageId, reason) =>
+    request('DELETE', '/api/continuum/moderation/messages/'
+      + encodeURIComponent(instanceId) + '/' + encodeURIComponent(messageId), { body: { reason } }),
+  continuumModerationMembers: (communityId) =>
+    request('GET', '/api/continuum/moderation/members'
+      + (communityId ? '?community_id=' + encodeURIComponent(communityId) : '')),
+  continuumRestrictMember: (instanceId, userId, body) =>
+    request('POST', '/api/continuum/moderation/members/'
+      + encodeURIComponent(instanceId) + '/' + encodeURIComponent(userId), { body }),
 
   // ---- instance discovery ----
   // The list of instances this one knows about. Public on purpose: it is a

@@ -7,11 +7,13 @@
 import { el } from '../../../packages/dom.js';
 import { icon } from '../../../packages/icons.js';
 import { avatar, empty, loading, failure, badge } from '../components.js';
-import { State, dmPeer, nameOf, refreshDms, presenceOf } from '../../../packages/store.js';
+import { State, dmPeer, nameOf, refreshDms, presenceOf, on as onStore } from '../../../packages/store.js';
 import { path, navigate } from '../../../packages/nav.js';
 import { relativeTime } from '../../../packages/format.js';
 import Api from '../../../packages/api.js';
 import { screen, section } from './util.js';
+import { attachLongPress } from '../ui.js';
+import { personActions } from '../person.js';
 import { renderConversation } from './messages.js';
 import { setAppBar } from '../shell.js';
 
@@ -46,8 +48,13 @@ export function renderDms() {
     host,
   );
 
+  // A conversation read elsewhere clears its badge without a reload.
+  let ready = false;
+  const offDms = onStore('dms', () => { if (ready) paint(); });
+
   async function load() {
     host.replaceChildren(loading('Loading your conversations'));
+    ready = true;
     try {
       await refreshDms();
       paint();
@@ -78,7 +85,7 @@ export function renderDms() {
     const updated = dm.updatedAt || dm.updated_at
       || (dm.lastMessage && (dm.lastMessage.created_at || dm.lastMessage.createdAt));
     const unread = Number(dm.unreadCount) || 0;
-    return el('a', {
+    const node = el('a', {
       class: 'm-row' + (unread ? ' is-unread' : ''),
       href: path('/dms/' + dm.id),
     },
@@ -89,9 +96,13 @@ export function renderDms() {
       el('span', { class: 'm-row__trailing' },
         badge(unread),
         updated ? el('span', { class: 'm-row__time' }, relativeTime(updated)) : null));
+    // A conversation is one of the things a person can be asked for, so the row
+    // carries that person's actions on a long press.
+    if (peer) attachLongPress(node, () => personActions(peer), { title: name });
+    return node;
   }
 
-  return { node, head: { title: 'Messages' }, onMount: load };
+  return { node, head: { title: 'Messages' }, onMount: load, cleanup() { offDms(); } };
 }
 
 export function renderDm(ctx) {

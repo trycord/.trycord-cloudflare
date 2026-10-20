@@ -9,18 +9,27 @@
 import { el, clear } from '../../../packages/dom.js';
 import { icon } from '../../../packages/icons.js';
 import { avatar, empty, loading, failure } from '../components.js';
-import { State, loadSession } from '../../../packages/store.js';
+import { State, loadSession, applyToken } from '../../../packages/store.js';
 import Api from '../../../packages/api.js';
 import { TrycordConfig } from '../../../packages/config.js';
 import { path, publicPath } from '../../../packages/nav.js';
-import { scopeNav } from '../../../packages/registry.js';
+import { scopeNav, pageById } from '../../../packages/registry.js';
+import { readPrefs, rememberDensity, rememberTabs, DENSITIES, TABS } from '../prefs.js';
 import { toast, confirm, sheet } from '../ui.js';
-import { currentTheme, setTheme, THEMES } from '../../../packages/theme.js';
+import theme, { currentTheme, setTheme, THEMES } from '../../../packages/theme.js';
+import locale from '../../../packages/locale.js';
 import { relativeTime } from '../../../packages/format.js';
-import { screen } from './util.js';
+import { screen, notice, primaryButton, ghostButton } from './util.js';
+import { encryptionBody } from './encryption.js';
 
-function field(label, control, note) {
-  return el('label', { class: 'm-field' },
+// What each density means on a phone.
+const DENSITY_HINT = {
+  compact: 'Small rows; more of them on screen.',
+  cozy: 'The ordinary phone.',
+  comfortable: 'Large rows, and larger touch targets.',
+};
+
+function field(label, control, note) {  return el('label', { class: 'm-field' },
     el('span', { class: 'm-field__label' }, label),
     control,
     note ? el('span', { class: 'm-field__note' }, note) : null);
@@ -186,7 +195,11 @@ function securityBody() {
     if (next.value !== again.value) { toast('The two new passwords do not match.', { type: 'info' }); return; }
     change.disabled = true;
     try {
-      await Api.changePassword({ currentPassword: current.value, newPassword: next.value });
+      const out = await Api.changePassword({ currentPassword: current.value, newPassword: next.value });
+      // The server ends every session when the password changes and hands
+      // back one for this device. Without taking it, the next request would
+      // be refused and the reader signed out by their own password change.
+      if (out && out.token) applyToken(out.token, out.user);
       current.value = next.value = again.value = '';
       toast('Password changed.', { type: 'success' });
     } catch (error) { toast(error.message, { type: 'danger' }); }
@@ -351,15 +364,23 @@ function recoveryCodes(reload) {
 
 function disableTwoFactor(reload) {
   const password = el('input', { class: 'm-input', type: 'password', autocomplete: 'current-password', 'aria-label': 'Password' });
+  const code = el('input', { class: 'm-input', type: 'text', inputmode: 'numeric', maxlength: '6', 'aria-label': 'Code from your app' });
   const layer = sheet({
     title: 'Turn off two-step sign-in',
-    body: el('div', { class: 'm-stack' }, el('p', { class: 'm-lede' }, 'Your password is the only key again.'), field('Password', password)),
+    body: el('div', { class: 'm-stack' },
+      el('p', { class: 'm-lede' }, 'Your password and a code from your app are both needed.'),
+      field('Password', password),
+      field('Code from your app', code)),
     footer: el('button', {
       class: 'm-btn m-btn--block m-btn--primary', type: 'button',
       onClick: async (event) => {
         event.currentTarget.disabled = true;
-        try { await Api.twoFactorDisable({ password: password.value }); layer.close(); toast('Two-step sign-in is off.', { type: 'success' }); reload(); }
-        catch (error) { toast(error.message, { type: 'danger' }); event.currentTarget.disabled = false; }
+        try {
+          await Api.twoFactorDisable({ password: password.value, code: code.value.trim() });
+          layer.close();
+          toast('Two-step sign-in is off.', { type: 'success' });
+          reload();
+        } catch (error) { toast(error.message, { type: 'danger' }); event.currentTarget.disabled = false; }
       },
     }, 'Turn off'),
   });
@@ -493,6 +514,64 @@ function notificationsBody() {
 
 // -- appearance --------------------------------------------------------------
 
+// -- the phone's own arrangement ------------------------------------------------
+//
+// The phone has its own composition and its own choices: how dense the lists
+// are, and which destinations the bottom bar carries. They are the phone's
+// business and are stored as the phone's business.
+
+function layoutBody() {
+  const host = el('div', { class: 'm-stack' });
+
+  const density = el('div', { class: 'm-list' });
+  function paintDensity() {
+    clear(density);
+    const current = readPrefs().density;
+    for (const name of DENSITIES) {
+      const active = current === name;
+      density.appendChild(el('button', {
+        class: 'm-row' + (active ? ' is-active' : ''), type: 'button',
+        'aria-pressed': String(active),
+        onClick: () => { rememberDensity(name); paintDensity(); },
+      },
+        el('span', { class: 'm-row__body' },
+          el('span', { class: 'm-row__title' }, name.charAt(0).toUpperCase() + name.slice(1)),
+          el('span', { class: 'm-row__sub' }, DENSITY_HINT[name] || '')),
+        el('span', { class: 'm-row__actions' }, active ? icon('check', { size: 18 }) : null)));
+    }
+  }
+  paintDensity();
+
+  const tabs = el('div', { class: 'm-list' });
+  function paintTabs() {
+    clear(tabs);
+    const current = readPrefs().tabs;
+    for (const id of TABS) {
+      const page = pageById(id);
+      if (!page) continue;
+      const active = current.indexOf(id) !== -1;
+      tabs.appendChild(el('button', {
+        class: 'm-row' + (active ? ' is-active' : ''), type: 'button',
+        'aria-pressed': String(active),
+        onClick: () => {
+          const next = active ? current.filter((entry) => entry !== id) : current.concat([id]);
+          rememberTabs(next);
+          paintTabs();
+        },
+      },
+        el('span', { class: 'm-row__lead' }, icon(page.nav && page.nav.icon ? page.nav.icon : 'circle-dot', { size: 18 })),
+        el('span', { class: 'm-row__body' },
+          el('span', { class: 'm-row__title' }, (page.nav && (page.nav.tabLabel || page.nav.short || page.nav.label)) || page.label)),
+        el('span', { class: 'm-row__actions' }, active ? icon('check', { size: 18 }) : null)));
+    }
+  }
+  paintTabs();
+
+  host.append(group('Density', density));
+  host.append(group('Bottom bar', tabs));
+  return host;
+}
+
 function appearanceBody() {
   const host = el('div', { class: 'm-list' });
   const choices = THEMES.filter((theme) => theme.id !== 'custom');
@@ -512,7 +591,242 @@ function appearanceBody() {
     }
   }
   paint();
-  return el('div', { class: 'm-stack' }, group('Theme', host));
+  return el('div', { class: 'm-stack' }, group('Theme', host), layoutBody(), themePackagesBody());
+}
+
+// -- language -----------------------------------------------------------------
+//
+// The reader's own language, and the formatting that follows from it. The
+// strings themselves are English in the source: a pack may translate the
+// strings the build declares, and the ones it translates are used.
+
+function languageBody() {
+  const host = el('div', { class: 'm-stack' });
+  const list = el('div', { class: 'm-list' });
+  const sample = el('p', { class: 'm-lede' });
+
+  async function paint() {
+    clear(list);
+    list.appendChild(loading('Reading the languages'));
+    try {
+      const [locales, preference] = await Promise.all([
+        Api.localisationLocales(),
+        Api.localisationPreference(),
+      ]);
+      const available = Array.isArray(locales) ? locales : [];
+      const chosen = preference && preference.locale ? preference.locale : null;
+      clear(list);
+
+      const options = [{ locale: null, label: 'The instance default', sub: 'Follow whatever this instance answers in' }]
+        .concat(available.map((entry) => ({
+          locale: entry.locale,
+          label: entry.locale,
+          sub: (entry.scope === 'community' ? 'A community pack' : 'An instance pack')
+            + ' · version ' + (entry.version || '?'),
+        })));
+
+      for (const entry of options) {
+        const active = String(entry.locale) === String(chosen);
+        list.appendChild(el('button', {
+          class: 'm-row' + (active ? ' is-active' : ''), type: 'button',
+          'aria-pressed': String(active),
+          onClick: async () => {
+            try {
+              await locale.setPreference(entry.locale);
+              toast(entry.locale ? 'The language is changed.' : 'The instance default is followed again.', { type: 'success' });
+              await paint();
+            } catch (error) { toast(error.message, { type: 'danger' }); }
+          },
+        },
+        el('span', { class: 'm-row__lead' }, icon('globe', { size: 18 })),
+        el('span', { class: 'm-row__body' },
+          el('span', { class: 'm-row__title' }, entry.label),
+          el('span', { class: 'm-row__sub' }, entry.sub)),
+        el('span', { class: 'm-row__actions' }, active ? icon('check', { size: 18 }) : null)));
+      }
+
+      sample.textContent = 'A date is written here as '
+        + locale.formatDate(new Date(), { year: 'numeric', month: 'long', day: 'numeric' })
+        + ', and a number as ' + locale.formatNumber(1234.5) + '.';
+    } catch (error) {
+      clear(list);
+      list.appendChild(failure(error, paint));
+    }
+  }
+
+  host.append(
+    group('Choose a language', list),
+    group('How it is written', sample));
+
+  paint();
+  return host;
+}
+
+// -- theme packages -------------------------------------------------------------
+//
+// The theme packages this instance runs. A package is values with a schema
+// version, not code: one that declares a version this build does not know is
+// refused, and one that carries anything but colours is refused too. A theme
+// that breaks the shell is refused here, before it is sent.
+
+function themePackagesBody() {
+  const host = el('div', { class: 'm-stack' });
+  const list = el('div', { class: 'm-list' });
+
+  function preview(pkg) {
+    const current = theme.loadPalette() || theme.DEFAULT_CUSTOM_TOKENS;
+    const previewed = theme.previewThemePackage(pkg, current);
+    if (!previewed.ok) {
+      return el('div', { class: 'm-stack' },
+        notice({ tone: 'danger', title: 'This package was refused', text: previewed.problems.join('; ') }));
+    }
+    if (!previewed.changes.length) {
+      return el('p', { class: 'm-lede' },
+        'This package sets the colours that are already in force. Applying it changes nothing here.');
+    }
+    return el('div', { class: 'm-stack' },
+      el('p', { class: 'm-lede' },
+        previewed.theme.name + ' ' + previewed.theme.version + ' would change '
+        + previewed.changes.length + ' colour' + (previewed.changes.length === 1 ? '' : 's') + ':'),
+      el('div', { class: 'm-list' }, previewed.changes.map((change) => el('div', { class: 'm-row' },
+        el('span', { class: 'm-row__body' },
+          el('span', { class: 'm-row__title' }, change.label),
+          el('span', { class: 'm-row__sub' }, change.from + ' → ' + change.to))))));
+  }
+
+  function openImport() {
+    const text = el('textarea', {
+      class: 'm-input m-input--area', rows: '6', spellcheck: 'false',
+      'aria-label': 'The theme package',
+      placeholder: '{ "schemaVersion": 1, "name": "Ember", "version": "1.0.0", "tokens": { "accent": "#FF4D24" } }',
+    });
+    const file = el('input', { type: 'file', accept: 'application/json,.json', class: 'visually-hidden', 'aria-label': 'Choose a theme package file' });
+    const previewed = el('div', { class: 'm-stack' });
+
+    const layer = sheet({
+      title: 'Import a theme package',
+      body: el('div', { class: 'm-stack' },
+        el('p', { class: 'm-lede' },
+          'A package is values, not code. A package that carries anything else is refused.'),
+        text,
+        file,
+        el('button', {
+          class: 'm-btn m-btn--sm m-btn--ghost', type: 'button',
+          onClick: () => file.click(),
+        }, 'Choose a file'),
+        previewed),
+      footer: el('div', { class: 'm-actions' },
+        primaryButton('Apply it', async () => {
+          let pkg = null;
+          try {
+            pkg = JSON.parse(text.value);
+          } catch (error) {
+            toast('That is not a package this build can read.', { type: 'danger' });
+            return;
+          }
+          const checked = theme.validateThemePackage(pkg);
+          if (checked.problems.length) {
+            toast('This package was refused: ' + checked.problems.join('; '), { type: 'danger' });
+            return;
+          }
+          const previous = theme.loadPalette();
+          const applied = theme.applyThemePackage(checked.theme.tokens);
+          if (!applied.ok) {
+            theme.applyCustomPalette(previous || theme.DEFAULT_CUSTOM_TOKENS);
+            theme.applyTheme();
+            toast('Refused: ' + (applied.problems || []).join('; '), { type: 'danger' });
+            return;
+          }
+          try {
+            await Api.importTheme({ theme: pkg });
+            layer.close();
+            toast('The theme is in force.', { type: 'success' });
+            await paint();
+          } catch (error) {
+            theme.applyCustomPalette(previous || theme.DEFAULT_CUSTOM_TOKENS);
+            theme.applyTheme();
+            toast(error.message, { type: 'danger' });
+          }
+        }, { block: true })),
+    });
+
+    file.addEventListener('change', () => {
+      const chosen = file.files && file.files[0];
+      if (!chosen) return;
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        text.value = String(reader.result || '');
+        try {
+          clear(previewed);
+          previewed.appendChild(preview(JSON.parse(text.value)));
+        } catch { /* the file is not a package this build can read */ }
+      });
+      reader.readAsText(chosen);
+    });
+  }
+
+  async function rollback() {
+    try {
+      const back = await Api.rollbackTheme();
+      const tokens = back && back.tokens;
+      if (tokens && Object.keys(tokens).length) {
+        const applied = theme.applyThemePackage(tokens);
+        if (!applied.ok) {
+          theme.applyCustomPalette(theme.DEFAULT_CUSTOM_TOKENS);
+          theme.applyTheme();
+        }
+      } else {
+        theme.clearCustomInline();
+        theme.applyTheme();
+      }
+      toast('The previous theme is in force again.', { type: 'success' });
+      await paint();
+    } catch (error) { toast(error.message, { type: 'danger' }); }
+  }
+
+  async function paint() {
+    clear(list);
+    list.appendChild(loading('Reading the themes'));
+    try {
+      const answer = await Api.themes();
+      const schema = (answer && answer.schema) || {};
+      const active = answer && answer.active;
+      const themes = Array.isArray(answer && answer.themes) ? answer.themes : [];
+      clear(list);
+
+      list.appendChild(el('div', { class: 'm-row' },
+        el('span', { class: 'm-row__body' },
+          el('span', { class: 'm-row__title' }, active ? active.name : 'The built-in ember'),
+          el('span', { class: 'm-row__sub' },
+            'version ' + (active ? active.version : '—') + ' · schema '
+            + ((schema.knownSchemaVersions || []).join(', ') || '—')))));
+
+      for (const entry of themes) {
+        list.appendChild(el('div', { class: 'm-row' },
+          el('span', { class: 'm-row__body' },
+            el('span', { class: 'm-row__title truncate' }, entry.name),
+            el('span', { class: 'm-row__sub truncate' },
+              'version ' + (entry.version || '?') + ' · schema ' + (entry.schemaVersion || '?')))));
+      }
+
+      host.replaceChildren(
+        group('This instance', el('div', { class: 'm-stack' },
+          list,
+          el('div', { class: 'm-actions' },
+            primaryButton('Import a package', openImport),
+            ghostButton('Roll back', rollback)))),
+        group('Installed packages', el('p', { class: 'm-lede' },
+          themes.length ? themes.length + ' package' + (themes.length === 1 ? '' : 's') + ' installed.'
+            : 'No theme packages installed yet.')));
+    } catch (error) {
+      clear(list);
+      list.appendChild(failure(error, paint));
+    }
+  }
+
+  host.append(group('Theme packages', list));
+  paint();
+  return host;
 }
 
 // -- connection --------------------------------------------------------------
@@ -572,7 +886,9 @@ export function renderSettings(ctx) {
     'settings.security': securityBody,
     'settings.privacy': privacyBody,
     'settings.notifications': notificationsBody,
+    'settings.encryption': encryptionBody,
     'settings.appearance': appearanceBody,
+    'settings.language': languageBody,
     'settings.backend': backendBody,
     'settings.updates': updatesBody,
   };
