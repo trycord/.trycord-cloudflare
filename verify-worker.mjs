@@ -134,6 +134,27 @@ console.log('\n--- public site must be untouched ---');
   ok(n === Object.keys(PAGES).length, n + ' public routes return their own page and never an app document');
 }
 
+// Every page in the tree, by its clean address.
+//
+// The worker used to answer a page only if it was named in a hand-written
+// map, and a page that was not in the map 404ed here while it worked on the
+// origin. The list here is read from the tree rather than written out, so a
+// page the tree holds is a page this checks.
+console.log('\n--- every page in the tree, by its clean address ---');
+{
+  const pages = [...files.keys()]
+    .filter((p) => /^\/[^/]+\.html$/.test(p) && p !== '/index.html' && p !== '/404.html')
+    .map((p) => p.replace(/\.html$/, ''));
+  let n = 0;
+  for (const p of pages) {
+    const r = await hit(p);
+    if (r.status !== 200 || r.desktop || r.mobile) fail(p.padEnd(26) + 'status=' + r.status);
+    else n++;
+  }
+  ok(n === pages.length, n + '/' + pages.length
+    + ' pages are reachable by their clean address (a page cannot 404 by being forgotten)');
+}
+
 console.log('\n--- public assets still served ---');
 {
   let n = 0;

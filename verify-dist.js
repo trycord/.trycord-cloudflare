@@ -319,6 +319,24 @@ if (!fs.existsSync(wrangler)) {
   ok('worker fetches the shell as /app/, not /app/index.html',
     /\/app\/index\.html/.test(w) === false || /\/app\/'\)/.test(w),
     'an explicit index file is redirected to its directory');
+  // Every page in the tree must be reachable by its clean address.
+  //
+  // The worker used to answer a page only if it was named in a hand-written
+  // map. The site grew a page, the map did not, and the page 404ed here
+  // while it worked on the origin - the two hosts disagreeing about the same
+  // tree. The worker now asks for the file when a path is not a file, so a
+  // page cannot 404 by being forgotten; this check says so, and names the
+  // pages that would 404 if that behaviour were taken away.
+  {
+    const pages = fs.readdirSync(DIST)
+      .filter((name) => name.endsWith('.html') && name !== 'index.html' && name !== '404.html')
+      .map((name) => '/' + name.replace(/\.html$/, ''));
+    const withoutExtension = /path\.replace\(\/\\\/\+\$\/, ''\) \+ '\.html'/.test(w)
+      || /\+ '\.html'/.test(w);
+    ok('every page is reachable by its clean address', withoutExtension && pages.length > 0,
+      'the worker does not answer a page that is not in its map, so these 404: '
+      + pages.join(', '));
+  }
   ok('worker sends auth aliases into the app', /\/login/.test(w) && /\/app\/login/.test(w),
     'no /login -> /app/login mapping');
 }

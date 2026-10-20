@@ -141,6 +141,24 @@ export default {
     const direct = await env.ASSETS.fetch(request);
     if (direct.ok) return direct;
 
+    // A page addressed without its extension.
+    //
+    // The clean-route map above is a hand-written list, and a hand-written
+    // list is a list that goes stale: the site grew a page, the map did
+    // not, and the page 404ed here while it worked on the origin. Every
+    // page in the tree is a file with a name, so a path that is not a file
+    // may still be a page - and the answer is to ask for the file.
+    //
+    // This is what makes the map above a convenience rather than a
+    // requirement: a page that is not in it is still answered, and a page
+    // that is in it is answered the same way.
+    if (!ASSET_PATH.test(path) && path !== '/') {
+      const page = await env.ASSETS.fetch(
+        new Request(new URL(path.replace(/\/+$/, '') + '.html', request.url), request),
+      );
+      if (page.ok) return page;
+    }
+
     // The 404 page, with a 404 status. Fetching it plainly would hand back a
     // 200 carrying the not-found page, so a crawler or a client checking status
     // would read a missing path as a real one.
