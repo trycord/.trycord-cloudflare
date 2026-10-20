@@ -20,7 +20,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const REPO = process.env.TRYCORD_REPO || 'https://github.com/trycord/.trycord.git';
+const REPO = process.env.TRYCORD_REPO || 'https://github.com/trycord/.trycord-cloudflare.git';
 const REF = process.env.TRYCORD_REF || 'main';
 const ROOT = __dirname;
 const SRC = path.join(ROOT, '.build', 'src');
