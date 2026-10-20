@@ -25,7 +25,7 @@ import { sheet, menu, confirm, toast } from '../ui.js';
 import { relativeTime } from '../../../packages/format.js';
 import {
   RSVP_STATUSES, RSVP_LABELS, ATTENDANCE_VISIBILITY_LABELS,
-  PRIORITY_LABELS, STATUS_LABELS, POLL_SCORING_LABELS,
+  PRIORITY_LABELS, STATUS_LABELS, POLL_SCORINGS, POLL_SCORING_LABELS,
   mayManageStructure, mayWriteDocuments, mayPost, mayActOn, paramId,
   formatInstant, readerZone, attendanceCounts, attendanceRows, bordaPoints,
   instantInZone,
@@ -517,6 +517,7 @@ export function renderDocument(ctx) {
       items: [
         { label: 'Paragraph', icon: 'file', onSelect: () => { blocks.push({ type: 'paragraph', text: '' }); paint(); } },
         { label: 'Heading', icon: 'edit', onSelect: () => { blocks.push({ type: 'heading', level: 2, text: '' }); paint(); } },
+        { label: 'Title', icon: 'edit', onSelect: () => { blocks.push({ type: 'heading', level: 1, text: '' }); paint(); } },
         { label: 'List', icon: 'list', onSelect: () => { blocks.push({ type: 'list', ordered: false, items: [''] }); paint(); } },
         { label: 'Quotation', icon: 'chat', onSelect: () => { blocks.push({ type: 'quote', text: '' }); paint(); } },
         { label: 'Note', icon: 'alert', onSelect: () => { blocks.push({ type: 'note', kind: 'info', text: '' }); paint(); } },
@@ -924,11 +925,16 @@ export function renderPoll(ctx) {
       }
     }
 
+    // The tally is the whole section's, not the block's: the voter list below
+    // needs it to name the options a ballot chose, and it is out of scope
+    // where it was - so the voter list threw a ReferenceError for every poll
+    // that had a voter.
+    const tally = results && results.results ? results.results : null;
+
     const result = el('div', { class: 'm-list' });
     if (resultsError) {
       result.appendChild(notice({ tone: 'info', title: 'The results are not visible yet', text: resultsError }));
-    } else if (results && results.results) {
-      const tally = results.results;
+    } else if (tally) {
       for (const option of tally.options || []) {
         result.appendChild(el('div', { class: 'm-row' },
           el('span', { class: 'm-row__body' },
@@ -1059,7 +1065,8 @@ function blockNode(block) {
   switch (block.type) {
     case 'heading':
       return el('div', { class: 'm-heading' },
-        el('h2', { class: 'm-heading__title' }, block.text));
+        el(block.level === 1 ? 'h1' : (block.level === 3 ? 'h3' : 'h2'),
+          { class: 'm-heading__title' }, block.text));
     case 'lead':
       return el('p', { class: 'm-lede' }, block.text);
     case 'paragraph':
@@ -1366,7 +1373,14 @@ function openEventEditor(serverId) {
 }
 
 // A poll, made.
-function openPollEditor(serverId) {
+// A poll, made or edited.
+//
+// The poll being edited is the third argument; without one this is a new poll.
+// The phone's editor takes two options, the desk's takes as many as the
+// reader adds: the two are different shapes of the same thing, and the server
+// is the one that says how many are needed.
+function openPollEditor(serverId, onChanged, poll) {
+  const editing = poll || null;
   const question = textInput({ label: 'The question' });
   const first = textInput({ label: 'Option 1' });
   const second = textInput({ label: 'Option 2' });
@@ -1376,8 +1390,15 @@ function openPollEditor(serverId) {
   });
   const error = el('p', { class: 'm-form-error', hidden: true });
 
+  if (editing) {
+    question.value = editing.question || '';
+    first.value = (editing.options && editing.options[0] && editing.options[0].label) || '';
+    second.value = (editing.options && editing.options[1] && editing.options[1].label) || '';
+    scoring.value = editing.scoring || 'plurality';
+  }
+
   const layer = sheet({
-    title: 'New poll',
+    title: editing ? 'Edit the poll' : 'New poll',
     body: el('div', { class: 'm-stack' },
       field({ label: 'Question', control: question }),
       field({ label: 'Option 1', control: first }),
@@ -1385,7 +1406,7 @@ function openPollEditor(serverId) {
       field({ label: 'Scoring', control: scoring }),
       error),
     footer: actions([
-      primaryButton('Create', async () => {
+      primaryButton(editing ? 'Save' : 'Create', async () => {
         error.hidden = true;
         const options = [first.value.trim(), second.value.trim()].filter(Boolean);
         if (!question.value.trim() || options.length < 2) {
@@ -1394,16 +1415,20 @@ function openPollEditor(serverId) {
           return;
         }
         try {
-          await Workspace.createPoll(serverId, {
-            question: question.value.trim(),
-            options,
-            scoring: scoring.value,
-          });
-          toast('The poll is made');
+          const body = { question: question.value.trim(), options, scoring: scoring.value };
+          if (editing) {
+            await Workspace.updatePoll(serverId, editing.id, body);
+            toast('The poll is saved');
+          } else {
+            await Workspace.createPoll(serverId, body);
+            toast('The poll is made');
+          }
           layer.close();
+          if (onChanged) await onChanged();
         } catch (err) {
           error.hidden = false;
-          error.textContent = (err && err.message) || 'The poll could not be made.';
+          error.textContent = (err && err.message)
+            || (editing ? 'The poll could not be saved.' : 'The poll could not be made.');
         }
       }, { block: true }),
     ]),
