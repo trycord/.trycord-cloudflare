@@ -79,7 +79,56 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(PORT, r));
 
 // env.ASSETS.fetch, backed by the simulation above.
+// The instance the worker proxies the application to, for the check.
+//
+// The application is served by the instance, not by this deployment, so the
+// check runs a second server that plays the instance: it answers /app/ with
+// the application's own document and its own assets, so the worker has
+// something to proxy to.
+const INSTANCE_PORT = 9989;
+const instanceServer = http.createServer((req, res) => {
+  const p = decodeURIComponent(req.url.split('?')[0]);
+  // The instance serves the application at its own mount. The check needs it
+  // to behave like the real thing - the same files, the same directory
+  // semantics - so the tree it serves is the one this deployment built, and
+  // one file is marked so the check can tell where the answer came from.
+  const instancePath = p.startsWith('/app') ? p : '/app' + p;
+  const hit = fileAt(instancePath);
+  if (hit) {
+    if (instancePath.endsWith('/index.html')) {
+      res.writeHead(307, { Location: instancePath.replace(/index\.html$/, '') });
+      return res.end();
+    }
+    const ext = path.extname(hit).toLowerCase();
+    let body = fs.readFileSync(hit);
+    if (instancePath === '/app/js/features/auth.js') {
+      // A marker, so the check can prove the answer came from the instance
+      // rather than from the deployment's own copy.
+      body = Buffer.from("// the instance's copy of the client\n" + body.toString('utf8'));
+    }
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    return res.end(body);
+  }
+  // The instance serves the application as a single-page application: a path
+  // that is not a file is a client route, and the instance answers it with
+  // the shell and lets the client's router take it from there.
+  if (!/\.[a-z0-9]+$/i.test(instancePath)) {
+    // The Mobile module has its own document, and a path under it gets that
+    // one - not the desktop shell.
+    const mobile = instancePath.startsWith('/app/mobile/');
+    const document = mobile ? '/app/mobile/index.html' : '/app/index.html';
+    if (files.has(document)) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(fs.readFileSync(fileAt(document)));
+    }
+  }
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not Found');
+});
+await new Promise((r) => instanceServer.listen(INSTANCE_PORT, '127.0.0.1', r));
+
 const env = {
+  BACKEND_ORIGIN: `http://127.0.0.1:${INSTANCE_PORT}`,
   ASSETS: {
     async fetch(input) {
       const u = new URL(typeof input === 'string' ? input : input.url);
@@ -103,6 +152,7 @@ async function hit(pathname) {
   const body = res.status === 200 ? await res.text() : '';
   return {
     status: res.status,
+    body,
     location: res.headers.get('location') || '',
     // The Desktop entry carries `id="app"` on its mount node and no platform
     // attribute; the Mobile entry declares `data-platform="mobile"`. They are
@@ -163,6 +213,30 @@ console.log('\n--- public assets still served ---');
     if (r.status === 200) n++; else fail(p.padEnd(26) + 'status=' + r.status);
   }
   ok(n === 3, 'public css/js/icons resolve');
+}
+
+console.log('\n--- the application comes from the instance ---');
+{
+  // The client must be the instance's, not the deployment's copy. A copy goes
+  // stale: for as long as the site was published from a tree that had not
+  // been rebuilt, a reader on trycord.dev was given the client of an older
+  // release while the same reader on api.trycord.dev was given the current
+  // one. Two addresses, two products.
+  const r = await hit('/app/js/features/auth.js');
+  if (r.status !== 200) fail('/app/js/features/auth.js status=' + r.status);
+  else if (!r.body.includes("the instance's copy of the client")) {
+    fail('the application was served from the deployment, not from the instance');
+  } else ok(true, 'the application is the instance\'s');
+
+  const shell = await hit('/app/');
+  if (shell.status !== 200 || !shell.body.includes('id="app"')) {
+    fail('the application shell did not come from the instance: status=' + shell.status);
+  } else ok(true, 'the application shell is the instance\'s');
+
+  const mobile = await hit('/app/mobile/');
+  if (mobile.status !== 200 || !mobile.mobile) {
+    fail('the Mobile document did not come from the instance: status=' + mobile.status);
+  } else ok(true, 'the Mobile document is the instance\'s');
 }
 
 console.log('\n--- the Desktop SPA fallback: every app route ---');

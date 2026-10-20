@@ -31,6 +31,91 @@ async function notFound(request, env) {
   return new Response(page.body, { status: 404, headers: page.headers });
 }
 
+// The instance the application is served from.
+//
+// The application is the product. The instance serves it, at the version the
+// instance is running, and it is the instance that knows the mount, the
+// client routes and the assets. This deployment carries the *website*.
+//
+// So the application is proxied rather than copied.
+//
+// It used to be copied: the build put a snapshot of the client into
+// dist/app/ and the worker served that snapshot. A snapshot goes stale the
+// moment the instance moves, and it did - for as long as the site was
+// published from a tree that had not been rebuilt, a reader who opened the
+// application on trycord.dev was given the client of an older release, with
+// the older register form and the older console, while the same reader on
+// api.trycord.dev was given the current one. Two addresses, two products.
+//
+// A proxy cannot go stale. The worker asks the instance for the application
+// and passes the answer on.
+const BACKEND_VAR = 'BACKEND_ORIGIN';
+
+// Where the application lives, or null when the deployment was not told.
+function backendOrigin(env) {
+  const configured = String((env && env[BACKEND_VAR]) || '').trim();
+  if (!configured) return null;
+  try {
+    const parsed = new URL(configured);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+// The application's own answer, passed on as it is.
+//
+// The status, the content type, the cache headers and the redirects all
+// belong to the instance: the instance knows whether a route is a document,
+// an asset or a client route, and it knows what a redirect means.
+async function proxyApp(request, env, origin) {
+  const target = new URL(request.url);
+  const base = new URL(origin);
+  target.protocol = base.protocol;
+  target.host = base.host;
+  const headers = new Headers(request.headers);
+  headers.set('X-Forwarded-Host', base.host);
+  headers.set('X-Forwarded-Proto', base.protocol);
+  let response;
+  try {
+    response = await fetch(new Request(target, request));
+  } catch (error) {
+    return unavailable(request, env, error);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+// The instance could not be reached.
+//
+// The page says so, in words, and offers a retry. It does not serve a copy
+// of the application: a copy is what got stale in the first place, and a
+// reader would be given an old client and no idea that anything was wrong.
+async function unavailable(request, env) {
+  const body = await env.ASSETS.fetch(
+    new Request(new URL('/404.html', request.url), request),
+  );
+  const html = await body.text();
+  const notice = `
+    <div style="max-width:34rem;margin:6rem auto;padding:0 1.5rem;font:16px/1.6 system-ui,sans-serif;color:#e8e8ea">
+      <h1 style="font-size:1.6rem;margin:0 0 .6rem">The application is not answering</h1>
+      <p style="margin:0 0 1rem;color:#a9a9b0">This site could not reach the Trycord instance that serves the
+      application. The site itself is fine; the instance is not answering at the moment.</p>
+      <p style="margin:0 0 1.4rem;color:#a9a9b0">If you are the operator, the instance is the thing to
+      look at. If you are a reader, try again in a moment.</p>
+      <a href="${request.url}" style="display:inline-block;padding:.6rem 1.1rem;border-radius:8px;background:#ff4d24;color:#fff;text-decoration:none;font-weight:600">Try again</a>
+    </div>`;
+  const page = html.replace('</body>', notice + '</body>');
+  return new Response(page, {
+    status: 503,
+    headers: { 'content-type': 'text/html; charset=utf-8', 'retry-after': '30' },
+  });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -110,16 +195,21 @@ export default {
       return Response.redirect(new URL('/app/mobile/', request.url), 302);
     }
 
-    if (path.startsWith('/app/mobile/')) {
-      const response = await env.ASSETS.fetch(request);
-      if (response.ok) return response;
-      // A missing file is a 404; only an extensionless route falls back to the
-      // Mobile document.
-      if (ASSET_PATH.test(path)) return notFound(request, env);
-      return env.ASSETS.fetch(new Request(new URL('/app/mobile/', request.url), request));
+    // The application comes from the instance, not from this deployment.
+    //
+    // The instance serves the client at its own mount, knows its own routes
+    // and its own assets, and is at the version it is running. A copy in the
+    // deployment is a copy that falls behind, and a reader who arrives at
+    // trycord.dev is then given a different product from the one the instance
+    // serves.
+    const origin = backendOrigin(env);
+    if (origin && path.startsWith('/app/')) {
+      return proxyApp(request, env, origin);
     }
 
     if (path.startsWith('/app/')) {
+      // No instance was configured, so the deployment's own copy is used. It
+      // is the fallback, not the rule.
       const response = await env.ASSETS.fetch(request);
 
       // `response.ok` rather than `status !== 404`: a real asset is a 2xx, and

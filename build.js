@@ -156,6 +156,7 @@ function build() {
   writeBaseHref(path.join(app, 'index.html'), APP_MOUNT);
 
   writeBackendConfig(path.join(app, 'backend.json'));
+  writeWorkerBackendOrigin(path.join(ROOT, 'wrangler.jsonc'));
   // The public site reads the instance's API too - the demo and the community
   // directory - and on this deployment the site and the API are different
   // origins. The address the app was given is the address the site is given,
@@ -241,6 +242,42 @@ function writeBackendConfig(dest) {
   const out = Object.assign({}, cfg, { fallbackUrls: fallbacks });
   fs.writeFileSync(dest, JSON.stringify(out, null, 2) + '\n');
   process.stdout.write(`  app/backend.json: ${out.backendUrl || '(unset)'} + ${fallbacks.length} fallback(s)\n`);
+}
+
+// The instance the worker proxies the application to.
+//
+// The worker asks the instance for the application rather than serving a copy
+// of it, so the copy cannot fall behind. The address is written into the
+// worker's configuration from the same place the site's own backend.json is
+// written from, so the two cannot drift apart: a deployment that points at
+// one instance points at it everywhere.
+function writeWorkerBackendOrigin(dest) {
+  let cfg = {};
+  const existing = path.join(clientDir(), 'backend.json');
+  if (fs.existsSync(existing)) {
+    try { cfg = JSON.parse(fs.readFileSync(existing, 'utf8')); } catch (e) {
+      throw new Error('trycord-client/backend.json is not valid JSON: ' + e.message);
+    }
+  }
+  const backendUrl = String(cfg.backendUrl || '').trim();
+  if (!/^https?:\/\//i.test(backendUrl)) {
+    throw new Error('the deployment has no API address to give the worker');
+  }
+  const origin = new URL(backendUrl).origin;
+
+  // The configuration is JSONC - it carries comments - so it is edited as
+  // text rather than parsed and re-written, which would throw the comments
+  // away.
+  let text = fs.readFileSync(dest, 'utf8');
+  const re = /("BACKEND_ORIGIN"\s*:\s*)"[^"]*"/;
+  if (re.test(text)) {
+    text = text.replace(re, '$1"' + origin + '"');
+  } else {
+    text = text.replace(/("observability"\s*:)/,
+      '  "vars": {\n    "BACKEND_ORIGIN": "' + origin + '"\n  },\n  $1');
+  }
+  fs.writeFileSync(dest, text);
+  process.stdout.write('  worker BACKEND_ORIGIN: ' + origin + '\n');
 }
 
 // The public site's own backend.json.

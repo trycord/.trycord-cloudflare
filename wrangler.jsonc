@@ -8,6 +8,15 @@
     "binding": "ASSETS",
     "not_found_handling": "none"
   },
+  // Where the application is served from.
+  //
+  // The worker proxies the application to the instance rather than serving a
+  // copy of it, so a reader on this origin is given the client the instance is
+  // running rather than the client of whatever release this tree was built
+  // from. The build writes this value, so the two cannot drift apart.
+  "vars": {
+    "BACKEND_ORIGIN": "https://api.trycord.dev"
+  },
   "observability": {
     "enabled": true
   }

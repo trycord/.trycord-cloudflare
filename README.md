@@ -48,6 +48,27 @@ npx wrangler deploy
 `dist/` is committed, so `wrangler deploy` alone is enough. Rebuild and commit
 `dist/` whenever the product source changes; nothing regenerates it implicitly.
 
+## The application is proxied, not copied
+
+The worker serves `/app/*` by **asking the instance** (`BACKEND_ORIGIN` in
+`wrangler.jsonc`) rather than by serving the `dist/app/` tree this
+repository builds.
+
+It used to serve the copy. A copy goes stale the moment the instance moves,
+and it did: for as long as the site was published from a tree that had not
+been rebuilt, a reader who opened the application on `trycord.dev` was given
+the client of an older release - the older register form, the older console -
+while the same reader on `api.trycord.dev` was given the current one. Two
+addresses, two products, and no way for a reader to tell.
+
+The build still writes `dist/app/`, because the worker needs it as the
+fallback for a deployment that was not told where its instance is, and because
+the verifier reads it. It is the fallback, not the rule.
+
+The address is written by the build from the same place the site's own
+`backend.json` is written from, so a deployment that points at one instance
+points at it everywhere.
+
 ## Deploy tree shape
 
 ```
