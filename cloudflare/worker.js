@@ -121,18 +121,30 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // The application's own paths, reachable from the root of the site.
+    //
     // Auth is part of the application, not the website. Someone who bookmarked
     // /login or followed a link from elsewhere should land on the app's own
     // sign-in rather than the public 404, but the canonical location is under
     // /app/ - a redirect rather than a second copy, so there is exactly one
     // place a session is established from.
-    const AUTH_ALIASES = {
+    //
+    // The application's home is the same. `/home` is the application's home
+    // route, and the public homepage has its own address, which is `/`. So
+    // `/home` is redirected into the application rather than answered with a
+    // second copy of the marketing page - which is what the catch-all below
+    // did with it, because the public site keeps its homepage in a file
+    // called home.html.
+    const APP_ALIASES = {
       '/login': '/app/login',
       '/register': '/app/register',
       '/forgot': '/app/forgot',
+      '/home': '/app/home',
     };
-    if (AUTH_ALIASES[path]) {
-      return Response.redirect(new URL(AUTH_ALIASES[path], request.url), 302);
+    // A trailing slash is the same path: `/home/` is `/home`.
+    const alias = APP_ALIASES[path] || APP_ALIASES[path.replace(/\/+$/, '')];
+    if (alias) {
+      return Response.redirect(new URL(alias, request.url), 302);
     }
 
     // The origin also serves the Mobile module at the origin-root alias /mobile/

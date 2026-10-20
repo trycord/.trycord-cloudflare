@@ -192,9 +192,16 @@ console.log('\n--- public site must be untouched ---');
 // page the tree holds is a page this checks.
 console.log('\n--- every page in the tree, by its clean address ---');
 {
+  // The addresses that belong to the application rather than to the public
+  // site. `/login`, `/register` and `/forgot` are the application's own, and
+  // so is `/home`: the application's home route, with the public homepage at
+  // `/`. Each is redirected into /app/ rather than answered with a second
+  // copy, and each is checked above.
+  const APPLICATION_ADDRESSES = ['/login', '/register', '/forgot', '/home'];
   const pages = [...files.keys()]
     .filter((p) => /^\/[^/]+\.html$/.test(p) && p !== '/index.html' && p !== '/404.html')
-    .map((p) => p.replace(/\.html$/, ''));
+    .map((p) => p.replace(/\.html$/, ''))
+    .filter((p) => APPLICATION_ADDRESSES.indexOf(p) === -1);
   let n = 0;
   for (const p of pages) {
     const r = await hit(p);
@@ -349,6 +356,28 @@ console.log('\n--- auth aliases ---');
     else fail(from + ' -> ' + r.status + ' ' + r.location + ' (want 302 ' + want + ')');
   }
   ok(n === 3, '/login /register /forgot redirect into /app/*');
+}
+
+console.log('\n--- the application\'s home is reachable from the root ---');
+{
+  // `/home` is the application's home route. The public site keeps its
+  // homepage in a file called home.html, so the catch-all answered `/home`
+  // with a second copy of the marketing page - the same page as `/`, at a
+  // URL that belongs to the application.
+  let n = 0;
+  for (const from of ['/home', '/home/']) {
+    const r = await hit(from);
+    const want = 'https://trycord.dev/app/home';
+    if (r.status === 302 && r.location === want) n++;
+    else fail(from + ' -> ' + r.status + ' ' + r.location + ' (want 302 ' + want + ')');
+  }
+  ok(n === 2, '/home and /home/ redirect into /app/home');
+}
+
+console.log('\n--- the public homepage is still at the root ---');
+{
+  const r = await hit('/');
+  ok(r.status === 200, '/ status=' + r.status + ' (want 200)');
 }
 
 console.log('\n--- /app with no trailing slash ---');
