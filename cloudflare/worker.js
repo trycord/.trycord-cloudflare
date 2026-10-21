@@ -167,6 +167,7 @@ export default {
       '/welcome': '/',
       '/features': '/features.html',
       '/docs': '/docs.html',
+      '/developers': '/developers.html',
       '/download': '/download.html',
       '/about': '/about.html',
       '/support': '/support.html',
