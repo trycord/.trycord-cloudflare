@@ -19,8 +19,13 @@
 import fs from 'fs';
 import path from 'path';
 import http from 'http';
+import { fileURLToPath } from 'url';
 
-const ROOT = '/tmp/cfw';
+// The tree this repository holds, wherever the repository is.
+//
+// It used to be a fixed path on one machine, so the check could only run
+// there - and the build failed everywhere else with a missing directory.
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(ROOT, 'dist');
 const PORT = 9988;
 const MIME = {

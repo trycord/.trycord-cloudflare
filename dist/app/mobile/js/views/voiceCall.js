@@ -12,22 +12,38 @@ import { el, replaceChildren } from '../../../packages/dom.js';
 import { icon } from '../../../packages/icons.js';
 import { sheet, toast } from '../ui.js';
 import { avatar } from '../components.js';
-import { State, nameOf } from '../../../packages/store.js';
+import { State } from '../../../packages/store.js';
 import {
   subscribe, current, join, leave, setMuted, setDeafened, enableMic,
   refreshDevices, setInputDevice, setOutputDevice,
+  canShareScreen, startScreenShare, stopScreenShare,
 } from '../../../packages/voiceSession.js';
 
 // The name of somebody in the room.
-function personOf(userId, serverId) {
+//
+// The room's own list is the first place to look, because it is the list of
+// the people who are in the room, and the server sends their names with it.
+// The member list is the second. A name that neither of them knows is said
+// as "Someone": a room that calls everybody "Unknown" tells the reader
+// nothing at all.
+function personOf(participant, serverId) {
+  const fromRoom = {
+    id: participant.userId,
+    username: participant.username || null,
+    displayName: participant.displayName || null,
+    nickname: participant.nickname || null,
+    avatarUrl: participant.avatarUrl || null,
+  };
   const roster = State.serverMembers.get(serverId)
     || (() => {
       for (const entry of State.serverMembers.values()) return entry;
       return null;
     })();
   const items = (roster && roster.items) || [];
-  return items.find((member) => String(member && member.id) === String(userId))
-    || { id: userId };
+  const fromRoster = items.find((member) => String(member && member.id) === String(participant.userId));
+  const known = fromRoom.displayName || fromRoom.username || fromRoom.nickname;
+  if (known) return fromRoom;
+  return fromRoster || fromRoom;
 }
 
 // The state of the connection, in a word.
@@ -75,8 +91,8 @@ export async function joinVoiceCall(channel) {
       people.appendChild(el('p', { class: 'm-section__note' }, 'Nobody is here yet.'));
     }
     for (const row of rows) {
-      const person = personOf(row.userId, channel.serverId);
-      const label = person.nickname || nameOf(person) || 'Someone';
+      const person = personOf(row, channel.serverId);
+      const label = person.nickname || person.displayName || person.username || 'Someone';
       people.appendChild(el('div', {
         class: 'm-row' + (row.speaking ? ' is-speaking' : ''),
       },
@@ -89,6 +105,17 @@ export async function joinVoiceCall(channel) {
                 : row.connection === 'failed' ? 'The connection failed'
                   : 'Connecting')),
         row.muted ? el('span', { class: 'm-row__trailing' }, icon('mic-off', { size: 16 })) : null));
+    }
+
+    // The screen somebody is sharing, if anybody is.
+    const screens = el('div', { class: 'm-stack' });
+    for (const [userId, stream] of Object.entries(s.sharedScreens || {})) {
+      if (!stream) continue;
+      const video = el('video', {
+        class: 'm-video', autoplay: true, playsinline: true, muted: true,
+      });
+      video.srcObject = stream;
+      screens.appendChild(video);
     }
 
     const controls = el('div', { class: 'm-stack' });
@@ -109,6 +136,14 @@ export async function joinVoiceCall(channel) {
     controls.appendChild(mic);
     controls.appendChild(deaf);
     controls.appendChild(gone);
+    if (canShareScreen()) {
+      const share = el('button', {
+        class: 'm-btn' + (s.sharing ? ' m-btn--ghost' : ''), type: 'button',
+        'aria-pressed': String(!!s.sharing),
+        onClick: () => (s.sharing ? stopScreenShare() : startScreenShare()),
+      }, s.sharing ? 'Stop sharing' : 'Share your screen');
+      controls.appendChild(share);
+    }
     if (s.listenOnly) {
       const grant = el('button', {
         class: 'm-btn m-btn--primary', type: 'button',
@@ -146,7 +181,7 @@ export async function joinVoiceCall(channel) {
         el('span', { class: 'm-field__label' }, 'Speaker'), picker));
     }
 
-    replaceChildren(host, status, people, devices, controls);
+    replaceChildren(host, status, people, screens, devices, controls);
   };
 
   const unsubscribe = subscribe(paint);

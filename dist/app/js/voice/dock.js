@@ -14,10 +14,11 @@
 import { el } from '../../packages/dom.js';
 import { icon } from '../../packages/icons.js';
 import { avatar } from '../ui/primitives.js';
-import { State, nameOf } from '../../packages/store.js';
+import { State } from '../../packages/store.js';
 import {
   subscribe, current, setMuted, setDeafened, leave, enableMic,
   refreshDevices, setInputDevice, setOutputDevice,
+  canShareScreen, startScreenShare, stopScreenShare,
 } from '../../packages/voiceSession.js';
 
 let paintFn = null;
@@ -35,9 +36,29 @@ function personOf(userId, serverId) {
   return member || null;
 }
 
+// The person a participant is, by the name the server sent with them.
+//
+// The room's own list is the first place to look, because it is the list of
+// the people who are in the room. The member list is the second, and a name
+// that neither of them knows is said as "Someone" - a room that calls
+// everybody "Unknown" is not telling the reader anything.
+function personFor(participant, serverId) {
+  const fromRoom = {
+    id: participant.userId,
+    username: participant.username || null,
+    displayName: participant.displayName || null,
+    nickname: participant.nickname || null,
+    avatarUrl: participant.avatarUrl || null,
+  };
+  const fromRoster = personOf(participant.userId, serverId);
+  const known = fromRoom.displayName || fromRoom.username || fromRoom.nickname;
+  if (known) return fromRoom;
+  return fromRoster || fromRoom;
+}
+
 function chip(participant, serverId) {
-  const person = personOf(participant.userId, serverId) || { id: participant.userId };
-  const label = person.nickname || nameOf(person) || 'Someone';
+  const person = personFor(participant, serverId);
+  const label = person.nickname || person.displayName || person.username || 'Someone';
   return el('span', {
     class: 'voice-dock__peer', 'data-peer': String(participant.userId), title: label,
   },
@@ -51,7 +72,8 @@ function structureSignature() {
   const s = current();
   if (!s.joined) return '';
   return JSON.stringify([
-    s.channel && s.channel.id, s.muted, s.deafened, s.listenOnly, s.connection,
+    s.channel && s.channel.id, s.muted, s.deafened, s.listenOnly, s.connection, s.sharing,
+    Object.keys(s.sharedScreens || {}),
     s.inputDeviceId, s.outputDeviceId, s.canChooseOutput,
     (s.inputs || []).map((device) => device.id),
     (s.outputs || []).map((device) => device.id),
@@ -163,12 +185,43 @@ function dockNode() {
   const peers = el('div', { class: 'voice-dock__peers' },
     (s.participants || []).slice(0, 6).map((p) => chip(p, s.channel && s.channel.serverId)));
 
+  // The screen somebody is sharing, if anybody is.
+  //
+  // The picture is carried peer to peer like the sound is, so the dock shows
+  // the stream the browser sent rather than a picture of its own.
+  const screens = el('div', { class: 'voice-dock__screens' });
+  for (const [userId, stream] of Object.entries(s.sharedScreens || {})) {
+    if (!stream) continue;
+    const video = el('video', {
+      class: 'voice-dock__screen', autoplay: true, playsinline: true, muted: true,
+    });
+    video.srcObject = stream;
+    const sharer = (s.participants || []).find((row) => String(row.userId) === String(userId));
+    const who = sharer
+      ? (sharer.nickname || sharer.displayName || sharer.username || 'Someone')
+      : ((personOf(userId, s.channel && s.channel.serverId) || {}).displayName || 'A screen');
+    screens.appendChild(el('div', { class: 'voice-dock__screenwrap' },
+      video,
+      el('span', { class: 'voice-dock__screenwho' }, who)));
+  }
+
+  // Sharing this seat's screen.
+  const shareButton = canShareScreen()
+    ? el('button', {
+      class: 'btn btn--default btn--sm', type: 'button',
+      'aria-pressed': String(!!s.sharing),
+      onClick: () => (s.sharing ? stopScreenShare() : startScreenShare()),
+    }, s.sharing ? 'Stop sharing' : 'Share your screen')
+    : null;
+
   return el('div', { class: 'voice-dock', role: 'complementary', 'aria-label': 'Voice session' },
     el('div', { class: 'voice-dock__top' }, lead,
       el('span', { class: 'voice-dock__state', 'data-state': state_ }, stateWord)),
     peers,
+    screens,
     status,
     devices,
+    shareButton ? el('div', { class: 'voice-dock__controls' }, shareButton) : null,
     controls);
 }
 

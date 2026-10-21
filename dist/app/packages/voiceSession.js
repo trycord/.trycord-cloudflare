@@ -37,6 +37,12 @@ const state = {
   // page choose the speaker, and the dock says so rather than offering a
   // picker that does nothing.
   canChooseOutput: false,
+  // Whether this seat is sharing its screen, and the stream it is sharing.
+  sharing: false,
+  shareStream: null,
+  // The screen a peer is sharing, by their id. The value is the media stream
+  // the browser sent, and it is there so the room can show it.
+  sharedScreens: {},
   // [{ userId, speaking, connection: 'connecting' | 'live' | 'reconnecting', muted }]
   participants: [],
   // A room-level note the room view and the dock show as they are.
@@ -119,6 +125,7 @@ let localStream = null;
 let audioContext = null;
 let selfWatch = null;
 let roomIceList = [];
+let localShare = null;
 
 const peers = new Map(); // userId -> { pc, polite, audio, watch, makingOffer }
 let unsubs = [];
@@ -303,6 +310,87 @@ function watchDevices() {
   navigator.mediaDevices.ondevicechange = () => { refreshDevices().catch(() => {}); };
 }
 
+// ---- sharing a screen --------------------------------------------------------
+
+// Whether this browser can share a screen at all.
+export function canShareScreen() {
+  return typeof navigator !== 'undefined'
+    && !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+}
+
+/**
+ * Start sharing this seat's screen.
+ *
+ * The screen is a video track, and in a mesh it goes to every peer: the
+ * picture is carried peer to peer like everything else. The browser asks the
+ * reader what to share, and the reader can stop it from the browser's own
+ * bar as well as from here.
+ */
+export async function startScreenShare() {
+  if (!canShareScreen()) {
+    note('This browser cannot share a screen.');
+    emit();
+    return state;
+  }
+  if (state.sharing) return state;
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+  } catch {
+    note('The screen was not shared; the browser said no.');
+    emit();
+    return state;
+  }
+  const track = stream && stream.getVideoTracks()[0];
+  if (!track) {
+    note('The screen was not shared; there was no picture in it.');
+    emit();
+    return state;
+  }
+  localShare = stream;
+  state.sharing = true;
+  state.shareStream = stream;
+  // The track goes to every peer, and the connection renegotiates for it.
+  for (const peer of peers.values()) {
+    try { peer.pc.addTrack(track, stream); } catch { /* renegotiation covers it */ }
+  }
+  // The reader can stop sharing from the browser's own bar, and the room has
+  // to hear about it.
+  track.addEventListener('ended', () => { stopScreenShare().catch(() => {}); });
+  note('You are sharing your screen.');
+  emit();
+  return state;
+}
+
+/**
+ * Stop sharing this seat's screen.
+ *
+ * The track is taken off every peer and the camera light goes out - the
+ * browser's own capture stops with it.
+ */
+export async function stopScreenShare() {
+  if (!state.sharing && !localShare) return state;
+  const stream = localShare;
+  localShare = null;
+  state.sharing = false;
+  state.shareStream = null;
+  if (stream) {
+    for (const track of stream.getTracks()) {
+      try { track.stop(); } catch { /* already stopped */ }
+    }
+  }
+  for (const peer of peers.values()) {
+    for (const sender of peer.pc.getSenders ? peer.pc.getSenders() : []) {
+      if (sender.track && sender.track.kind === 'video') {
+        sender.replaceTrack(null).catch(() => { /* renegotiation covers it */ });
+      }
+    }
+  }
+  note('You stopped sharing your screen.');
+  emit();
+  return state;
+}
+
 // ---- one peer ----------------------------------------------------------------
 
 function speakingOf(stream) {
@@ -319,10 +407,28 @@ function speakingOf(stream) {
   }
 }
 
-function peerRow(userId) {
+function peerRow(userId, person) {
   const known = state.participants.find((p) => String(p.userId) === String(userId));
-  if (known) return known;
-  const row = { userId: String(userId), speaking: false, connection: 'connecting', muted: false };
+  if (known) {
+    // The name is filled in when it is first heard, and kept after that: a
+    // person who joins the room is named in the room's list, and the list is
+    // the only place the name comes from.
+    if (person && !known.displayName) {
+      known.username = person.username;
+      known.displayName = person.displayName;
+      known.avatarUrl = person.avatarUrl;
+    }
+    return known;
+  }
+  const row = {
+    userId: String(userId),
+    speaking: false,
+    connection: 'connecting',
+    muted: false,
+    username: (person && person.username) || null,
+    displayName: (person && person.displayName) || null,
+    avatarUrl: (person && person.avatarUrl) || null,
+  };
   state.participants.push(row);
   return row;
 }
@@ -359,6 +465,14 @@ function buildPeer(userId) {
   peer.pc.ontrack = (event) => {
     const remote = event.streams && event.streams[0];
     if (!remote) return;
+    // A video track is somebody sharing their screen. It is kept apart from
+    // the audio, so the room can show the picture without the microphone
+    // hearing it.
+    if (event.track && event.track.kind === 'video') {
+      state.sharedScreens[String(userId)] = remote;
+      emit();
+      return;
+    }
     peer.audio.srcObject = remote;
     attachAudio(peer.audio, state.deafened);
     if (!peer.watch) peer.watch = speakingOf(remote);
@@ -479,9 +593,14 @@ async function refreshRoom() {
   if (!state.channel) return;
   let seat = null;
   let ids = [];
+  let people = [];
   try {
     const room = await Api.voiceMeshPeers(state.channel.id);
     ids = ((room && room.participants) || []).map(String);
+    // The people the room holds, with their names. The server sends them
+    // with the peers, so a room that lists "Unknown" for everybody is a
+    // thing that cannot happen.
+    people = (room && Array.isArray(room.people)) ? room.people : [];
     if (myId() && !ids.includes(myId())) {
       // The server dropped the seat: the socket blinked, or a moderator
       // disconnected it. Re-seating is honest; pretending is not.
@@ -494,8 +613,9 @@ async function refreshRoom() {
     return;
   }
 
+  const byId = new Map(people.map((person) => [String(person.userId), person]));
   for (const userId of ids) {
-    peerRow(userId);
+    peerRow(userId, byId.get(String(userId)));
     if (!peers.has(String(userId))) buildPeer(userId);
   }
   for (const key of Array.from(peers.keys())) {
@@ -569,8 +689,19 @@ export async function join(channel) {
     }
     if (localStream) selfWatch = speakingOf(localStream);
 
+    // The people already in the room, with their names, so the dock shows
+    // who is speaking from the first paint and not from the second one.
+    let people = [];
+    try {
+      const room = await Api.voiceMeshPeers(channel.id);
+      people = (room && Array.isArray(room.people)) ? room.people : [];
+    } catch {
+      // The names are not worth failing a join over: the room poll brings
+      // them a moment later.
+    }
+    const byId = new Map(people.map((person) => [String(person.userId), person]));
     for (const userId of ((seat && seat.participants) || [])) {
-      peerRow(String(userId));
+      peerRow(String(userId), byId.get(String(userId)));
       buildPeer(String(userId));
     }
 
@@ -583,11 +714,18 @@ export async function join(channel) {
     pollTimer = setInterval(() => { refreshRoom().catch(() => {}); }, POLL_MS);
     pulseTimer = setInterval(() => { pulse(); }, 220);
 
+    // What the reader should know about the room they are in.
+    //
+    // An empty ICE list means the instance has no relay to offer, and a call
+    // with no relay can only be made between two people on the same network.
+    // Saying so is better than a call that silently never connects.
     const notes = [];
     if (!roomIceList.length) {
-      notes.push('No STUN or TURN is configured on this instance; connections may only form on the same network.');
+      notes.push('This instance has no relay to offer, so the call can only be made on one network.');
     }
-    if (seat && seat.maxParticipants) notes.push('Peer-to-peer room, up to ' + seat.maxParticipants + ' people.');
+    if (seat && seat.maxParticipants) {
+      notes.push('Peer to peer, up to ' + seat.maxParticipants + ' people in the room.');
+    }
     note(notes.join(' '));
     emit();
     return state;
@@ -612,6 +750,17 @@ export async function leave() {
     }
     localStream = null;
   }
+  // The screen goes with the seat: a share nobody can stop is a share that
+  // follows the reader off the page.
+  if (localShare) {
+    for (const track of localShare.getTracks()) {
+      try { track.stop(); } catch { /* already stopped */ }
+    }
+    localShare = null;
+  }
+  state.sharing = false;
+  state.shareStream = null;
+  state.sharedScreens = {};
   selfWatch = null;
   destroyPeers();
   state.channel = null;
@@ -702,4 +851,5 @@ function levelOf(watch) {
 export default {
   subscribe, capabilities, join, leave, setMuted, setDeafened, enableMic,
   pulse, setLocalUserId, state, refreshDevices, setInputDevice, setOutputDevice,
+  canShareScreen, startScreenShare, stopScreenShare,
 };
