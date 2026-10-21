@@ -185,6 +185,32 @@ export const STUB = `
     window.localStorage.setItem('trycord.token.http://localhost:9971', 'harness-token');
   } catch (e) { /* the client will be signed out */ }
 
+  // The history, on a document off disk.
+  //
+  // A document on disk cannot change its own address, so a history write
+  // throws and the navigation never happens: a community that opens its
+  // first channel would ask for the same page for ever, because the route it
+  // asked for was never recorded.
+  //
+  // The harness gives it a history that works, and the route it was asked
+  // for is remembered, so a page that navigates actually goes there.
+  (function () {
+    var realPush = history.pushState.bind(history);
+    var realReplace = history.replaceState.bind(history);
+    function record(url) {
+      if (typeof url !== 'string' || url.charAt(0) !== '/') return;
+      window.__trycordRoute = url;
+    }
+    history.pushState = function (state, title, url) {
+      record(url);
+      try { realPush(state, title, location.pathname); } catch (e) { /* the address cannot change */ }
+    };
+    history.replaceState = function (state, title, url) {
+      record(url);
+      try { realReplace(state, title, location.pathname); } catch (e) { /* the address cannot change */ }
+    };
+  })();
+
   window.fetch = function (input, options) {
     var url = String(input);
     var method = String((options && options.method) || 'GET').toUpperCase();
@@ -315,10 +341,24 @@ export class Page {
     };
   }
 
+  /**
+   * Send a call and wait for its answer.
+   *
+   * The wait is bounded. A browser that is asked something it never answers
+   * - a page that is navigating, a tab that is gone - would otherwise leave
+   * the harness waiting for ever, with nothing to say so.
+   */
   send(method, params) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const id = ++this.next;
-      this.waiting.set(id, resolve);
+      const timer = setTimeout(() => {
+        this.waiting.delete(id);
+        reject(new Error('the browser did not answer ' + method));
+      }, 30000);
+      this.waiting.set(id, (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      });
       this.socket.send(JSON.stringify({ id, method, params: params || {} }));
     });
   }
@@ -347,6 +387,29 @@ export class Page {
  * error is a harness that quietly measures the real instance instead of the
  * answers.
  */
+/**
+ * A port nothing is listening on.
+ *
+ * A browser that cannot bind the port it was asked for leaves the harness
+ * waiting for a browser that is never going to come - and a stale browser
+ * from an interrupted run is enough to do it. So the port is checked first,
+ * and a busy one is an error rather than a wait.
+ */
+export async function freePort(preferred) {
+  const net = await import('node:net');
+  const taken = (port) => new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(true));
+    server.once('listening', () => server.close(() => resolve(false)));
+    server.listen(port, '127.0.0.1');
+  });
+  if (preferred && !(await taken(preferred))) return preferred;
+  for (let port = 9400; port < 9500; port++) {
+    if (!(await taken(port))) return port;
+  }
+  throw new Error('no free port for the browser');
+}
+
 export async function harness(port) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'trycord-app-'));
   // A run that is interrupted leaves the browser's profile behind, and a
