@@ -57,7 +57,19 @@ ok('/js/site.js', has(path.join('js', 'site.js')), 'missing');
 ok('/js/status.js', has(path.join('js', 'status.js')), 'missing');
 // Brand images are republished from the WAC tree. They are the one thing here
 // that has no duplicate source any more, so a missed copy step is fatal.
-for (const a of ['trycord-logo.png', 'trycord-logo.ico', 'trycord-login-bg.png']) {
+//
+// The site asks for the asset library, so the library is what has to be there:
+// the app icons, the fonts and the brand images, all under the one path.
+for (const a of [
+  'trycord-assets/app/favicon.svg',
+  'trycord-assets/app/trycord-app-icon.svg',
+  'trycord-assets/app/trycord-logo.ico',
+  'trycord-assets/app/trycord-og-image.png',
+  'trycord-assets/brand/trycord-symbol.svg',
+  'trycord-assets/fonts/manrope-latin-wght-normal.woff2',
+  'trycord-assets/fonts/jetbrains-mono-latin-wght-normal.woff2',
+  'trycord-assets/tokens/trycord.css',
+]) {
   ok('/assets/' + a, has(path.join('assets', a)), 'missing');
 }
 
