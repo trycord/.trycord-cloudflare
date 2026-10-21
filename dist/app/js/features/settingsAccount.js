@@ -10,7 +10,8 @@ import {
 } from '../../packages/profileMedia.js';
 import { avatar, bannerNode } from '../ui/primitives.js';
 import { head, card, fault, fold } from '../ui/page.js';
-import { errorToast, toast } from '../ui/overlays.js';
+import { errorToast, toast, openDialog } from '../ui/overlays.js';
+import { createCropper } from '../../packages/imageCropper.js';
 
 // The identity panel.
 //
@@ -75,6 +76,44 @@ function paint(identity, user, reload) {
     }
   };
 
+  // The part of the picture to use.
+  //
+  // The reader chooses: the picture is shown, a frame is dragged over the
+  // part of it they want, and that part is what is uploaded. A frame over
+  // the middle of a photograph is rarely the face in it.
+  const choosePart = (file, kind) => new Promise((resolve) => {
+    const shape = kind === 'avatar' ? 'square' : 'wide';
+    createCropper(file, { shape, size: kind === 'avatar' ? 512 : 1024 }).then((cropper) => {
+      if (!cropper) {
+        // A browser that cannot draw the picture cannot crop it either, so
+        // the picture goes up as it is.
+        resolve(file);
+        return;
+      }
+      const dialog = openDialog({
+        title: kind === 'avatar' ? 'Choose your picture' : 'Choose your cover',
+        sub: 'Drag the frame over the part of the picture to use.',
+        body: cropper.node,
+        foot: [
+          el('button', {
+            class: 'btn btn--default btn--sm', type: 'button',
+            onClick: () => { cropper.destroy(); dialog.close(); resolve(null); },
+          }, 'Cancel'),
+          el('button', {
+            class: 'btn btn--primary btn--sm', type: 'button',
+            onClick: async () => {
+              const cropped = await cropper.result();
+              cropper.destroy();
+              dialog.close();
+              resolve(cropped || file);
+            },
+          }, 'Use this picture'),
+        ],
+        onClose: () => { cropper.destroy(); resolve(null); },
+      });
+    }).catch(() => resolve(file));
+  });
+
   const uploadPicture = async (kind, input) => {
     const file = input.files && input.files[0];
     if (!file) return;
@@ -86,20 +125,27 @@ function paint(identity, user, reload) {
       input.value = '';
       return;
     }
-    // The chosen picture is shown while it is on its way up, so the reader
-    // sees what they picked before the server has answered.
-    const chosen = previewOf(file);
+    // The part of the picture to use is chosen first.
+    const chosen = await choosePart(file, kind);
+    if (!chosen) {
+      pictureNote.textContent = '';
+      input.value = '';
+      return;
+    }
+    // The chosen part is shown while it is on its way up, so the reader sees
+    // what they picked before the server has answered.
+    const shown = previewOf(chosen);
     if (kind === 'avatar') {
-      preview = chosen;
-      face.replaceChildren(el('img', { class: 'avatar-img', src: chosen.url, alt: '' }));
+      preview = shown;
+      face.replaceChildren(el('img', { class: 'avatar-img', src: shown.url, alt: '' }));
     } else {
-      preview = chosen;
-      cover.replaceChildren(el('img', { class: 'settings-banner', src: chosen.url, alt: '' }));
+      preview = shown;
+      cover.replaceChildren(el('img', { class: 'settings-banner', src: shown.url, alt: '' }));
       cover.classList.remove('is-empty');
     }
     pictureNote.textContent = 'Uploading the picture…';
     try {
-      const updated = await uploadProfilePicture(kind, file);
+      const updated = await uploadProfilePicture(kind, chosen);
       pictureNote.textContent = kind === 'banner'
         ? 'The cover image is up.'
         : 'The picture is up.';

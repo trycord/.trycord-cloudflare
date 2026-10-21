@@ -126,7 +126,14 @@ function profileBody() {
       }
       upload.disabled = true;
       try {
-        await uploadProfilePicture(kind, file);
+        // The part of the picture to use is chosen first.
+        const chosen = await choosePart(file, kind);
+        if (!chosen) {
+          upload.disabled = false;
+          input.value = '';
+          return;
+        }
+        await uploadProfilePicture(kind, chosen);
         await loadSession();
         toast(kind === 'banner' ? 'The cover image was uploaded.' : 'The picture was uploaded.', { type: 'success' });
         paint();
