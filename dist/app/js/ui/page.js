@@ -21,6 +21,10 @@ export function head(options) {
   const opts = options || {};
   return el('header', { class: 'pagehead' },
     el('div', { class: 'pagehead-main' },
+      // The identity of the place, when the page belongs to one. It is a node
+      // and not a word, because a community says who it is with its mark as
+      // much as with its name.
+      opts.identity || null,
       opts.kicker ? el('p', { class: 'pagehead-kicker' }, opts.kicker) : null,
       opts.title ? el('h1', { class: 'pagehead-title' }, opts.title) : null,
       opts.lede ? el('p', { class: 'pagehead-lede' }, opts.lede) : null),
@@ -81,7 +85,10 @@ export function row(options) {
     opts.lead ? el('span', { class: 'cardrow-lead' }, opts.lead) : null,
     el('span', { class: 'cardrow-main' },
       opts.title ? el('span', { class: 'cardrow-title' }, opts.title) : null,
-      opts.sub ? el('span', { class: 'cardrow-sub' }, opts.sub) : null),
+      opts.sub ? el('span', { class: 'cardrow-sub' }, opts.sub) : null,
+      // Anything else the line has to carry: the conversation a search hit
+      // came from, for instance.
+      opts.body || null),
     opts.side ? el('span', { class: 'cardrow-side' }, opts.side) : null,
     opts.meta ? el('span', { class: 'cardrow-meta' }, opts.meta) : null,
   );
