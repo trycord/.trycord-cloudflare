@@ -94,12 +94,8 @@ async function proxyApp(request, env, origin) {
 //
 // The instance adds the canonical link and the social tags to the pages it
 // serves, using its own address. This deployment serves the same files from
-// the asset binding, so it has to do the same thing - otherwise the pages
-// here have no canonical address and no link preview, while the instance's
-// own copy of the same files has both.
-//
-// The address is the one the request came in on, so a self-hosted deployment
-// points at itself and never at somebody else's site.
+// the asset binding, so it does the same thing - with the address the request
+// came in on, so a self-hosted deployment points at itself.
 async function withPageMeta(request, response) {
   const type = response.headers.get('content-type') || '';
   if (!type.includes('text/html')) return response;
