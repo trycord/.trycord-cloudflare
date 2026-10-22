@@ -296,6 +296,21 @@ function applyOverrides(dir) {
       const s = path.join(src, e.name);
       const d = path.join(DIST, path.relative(dir, s));
       if (e.isDirectory()) { fs.mkdirSync(d, { recursive: true }); walk(s); continue; }
+      // A stylesheet here freezes the site's design.
+      //
+      // The stylesheet that was in this folder was a copy of the site's from
+      // months earlier, and it was laid over the top of the current one on
+      // every build - so the deployment served the new pages with the old
+      // styles, and nothing said so. A stylesheet is the product's business:
+      // if this deployment needs a change to it, the change goes in the
+      // product, where the next build picks it up.
+      if (e.name.endsWith('.css')) {
+        throw new Error(
+          'public-overrides/' + path.relative(dir, s) + ' is a stylesheet. '
+          + 'It would freeze the site\'s design, and it is not noticed when it goes stale. '
+          + 'Put the change in the product repository instead.',
+        );
+      }
       fs.mkdirSync(path.dirname(d), { recursive: true });
       fs.copyFileSync(s, d);
       n++;

@@ -152,8 +152,10 @@ ok('/app/mobile/js/ has the mobile entry', isDir(path.join('app', 'mobile', 'js'
   }
   for (const f of ['terms', 'privacy']) {
     const rel = f + '.html';
+    const page = has(rel) ? fs.readFileSync(path.join(DIST, rel), 'utf8') : '';
     ok(f + '.html states its version and effective date', has(rel) &&
-      /class="doc-meta"/.test(fs.readFileSync(path.join(DIST, rel), 'utf8')), 'no doc-meta block');
+      /Template last revised:/.test(page) && /Effective on this instance:/.test(page),
+      'the page does not say when it was last revised or when it takes effect');
   }
 }
 
