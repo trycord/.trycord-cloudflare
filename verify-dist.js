@@ -353,5 +353,52 @@ if (!fs.existsSync(wrangler)) {
     'no /login -> /app/login mapping');
 }
 
+// The tree says where it came from, and the product has moved on since.
+//
+// The tree is committed and published by hand, so "is what I am about to
+// publish the current product?" is a question the tree has to answer on its
+// own. The marker the build writes says which revision it was built from,
+// and this says out loud when that revision is not the one the branch points
+// at - which is how a site ends up serving last month's pages while the
+// repository says it was rebuilt.
+//
+// A tree built from an older revision on purpose - a rollback - is not a
+// failure. It is said out loud, and the publish is left to the operator.
+{
+  const marker = path.join(DIST, 'build-info.json');
+  ok('the tree says which revision it was built from', has('build-info.json'),
+    'there is no build-info.json in the tree, so nothing can say how old it is');
+  if (has('build-info.json')) {
+    let info = null;
+    try { info = JSON.parse(fs.readFileSync(marker, 'utf8')); } catch { info = null; }
+    ok('the marker names the revision it was built from', !!(info && info.commit),
+      'the marker does not name a commit');
+
+    const ref = String((info && info.ref) || '').trim();
+    const commit = String((info && info.commit) || '').trim();
+    if (ref && commit) {
+      // The branch's head, asked of the remote. A remote that cannot be
+      // reached is not a failure: the tree is still what it says it is.
+      let head = '';
+      try {
+        const { execFileSync } = require('child_process');
+        const url = process.env.TRYCORD_REPO || 'https://github.com/trycord/.trycord.git';
+        const out = execFileSync('git', ['ls-remote', url, ref], { encoding: 'utf8' });
+        head = (out.split(/\s+/)[0] || '').trim();
+      } catch { head = ''; }
+      if (head) {
+        const same = head.startsWith(commit) || commit.startsWith(head);
+        if (!same) {
+          console.log(`  note   the tree was built from ${commit.slice(0, 12)} and ${ref} is at `
+            + `${head.slice(0, 12)} - rebuild before publishing, unless this is a rollback`);
+        } else {
+          pass++;
+          console.log('  ok    the tree was built from the head of ' + ref);
+        }
+      }
+    }
+  }
+}
+
 console.log(`\nverify-dist: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

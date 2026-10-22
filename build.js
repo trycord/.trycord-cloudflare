@@ -431,6 +431,19 @@ fs.rmSync(DIST, { recursive: true, force: true });
 
 const head = fetchSource();
 build();
+
+// The tree says where it came from.
+//
+// The tree is committed and published by hand, so the question "is what I am
+// about to publish the current product?" has to be answerable without
+// reading the build's output. The marker is written into the tree, and the
+// verifier reads it: a tree built from an older revision says so, and the
+// deploy can say it out loud.
+fs.writeFileSync(
+  path.join(DIST, 'build-info.json'),
+  JSON.stringify({ ref: REF, commit: head, builtAt: new Date().toISOString() }, null, 2) + '\n',
+);
+
 const n = fs.readdirSync(DIST, { recursive: true }).filter((f) => fs.statSync(path.join(DIST, f)).isFile()).length;
 process.stdout.write(`\ndist/: ${n} files (source ${head})\n`);
 process.stdout.write('now run: node verify-dist.js\n');
