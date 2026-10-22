@@ -90,6 +90,57 @@ async function proxyApp(request, env, origin) {
   });
 }
 
+// The page's own metadata.
+//
+// The instance adds the canonical link and the social tags to the pages it
+// serves, using its own address. This deployment serves the same files from
+// the asset binding, so it has to do the same thing - otherwise the pages
+// here have no canonical address and no link preview, while the instance's
+// own copy of the same files has both.
+//
+// The address is the one the request came in on, so a self-hosted deployment
+// points at itself and never at somebody else's site.
+async function withPageMeta(request, response) {
+  const type = response.headers.get('content-type') || '';
+  if (!type.includes('text/html')) return response;
+  let html;
+  try {
+    html = await response.text();
+  } catch {
+    return response;
+  }
+  if (!html.includes('</head>')) return response;
+
+  const origin = new URL(request.url).origin;
+  const path = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
+  const url = origin + path;
+  const esc = (s) => String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const titleM = /<title>([\s\S]*?)<\/title>/i.exec(html);
+  const descM = /<meta\s+name="description"\s+content="([^"]*)"/i.exec(html);
+  const title = titleM ? esc(titleM[1].trim()) : 'Trycord';
+  const image = origin + '/assets/trycord-assets/app/trycord-og-image.png';
+  const meta = [
+    '<link rel="canonical" href="' + esc(url) + '">',
+    '<meta property="og:url" content="' + esc(url) + '">',
+    '<meta property="og:type" content="website">',
+    '<meta property="og:site_name" content="Trycord">',
+    '<meta property="og:title" content="' + title + '">',
+    '<meta property="og:image" content="' + esc(image) + '">',
+    '<meta name="twitter:card" content="summary_large_image">',
+    '<meta name="twitter:title" content="' + title + '">',
+    '<meta name="twitter:image" content="' + esc(image) + '">',
+  ];
+  if (descM) {
+    meta.push('<meta property="og:description" content="' + esc(descM[1]) + '">');
+    meta.push('<meta name="twitter:description" content="' + esc(descM[1]) + '">');
+  }
+  const head = html.replace('</head>', '  ' + meta.join('\n  ') + '\n</head>');
+  const headers = new Headers(response.headers);
+  headers.set('content-type', 'text/html; charset=utf-8');
+  return new Response(head, { status: response.status, statusText: response.statusText, headers });
+}
+
 // The instance could not be reached.
 //
 // The page says so, in words, and offers a retry. It does not serve a copy
@@ -180,9 +231,10 @@ export default {
     };
 
     if (publicRoutes[path]) {
-      return env.ASSETS.fetch(
+      const page = await env.ASSETS.fetch(
         new Request(new URL(publicRoutes[path], request.url), request),
       );
+      return withPageMeta(request, page);
     }
 
     if (path === '/app') {
@@ -242,7 +294,7 @@ export default {
     // 404.html: the browser was handed HTML where it expected CSS and JS, so
     // the entire public site loaded unstyled and inert.
     const direct = await env.ASSETS.fetch(request);
-    if (direct.ok) return direct;
+    if (direct.ok) return withPageMeta(request, direct);
 
     // A page addressed without its extension.
     //
@@ -259,7 +311,7 @@ export default {
       const page = await env.ASSETS.fetch(
         new Request(new URL(path.replace(/\/+$/, '') + '.html', request.url), request),
       );
-      if (page.ok) return page;
+      if (page.ok) return withPageMeta(request, page);
     }
 
     // The 404 page, with a 404 status. Fetching it plainly would hand back a

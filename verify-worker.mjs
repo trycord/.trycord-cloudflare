@@ -220,7 +220,7 @@ console.log('\n--- every page in the tree, by its clean address ---');
 console.log('\n--- public assets still served ---');
 {
   let n = 0;
-  for (const p of ['/css/site.css', '/js/site.js', '/assets/trycord-logo.ico']) {
+  for (const p of ['/css/site.css', '/js/site.js', '/assets/trycord-assets/app/trycord-app-icon.svg']) {
     const r = await hit(p);
     if (r.status === 200) n++; else fail(p.padEnd(26) + 'status=' + r.status);
   }
